@@ -27,7 +27,7 @@ or technical accuracy to meet a word target. Vary verbs naturally; remove filler
 A useful bullet need not contain a number. Never manufacture metrics, lower a remembered number to
 make it sound conservative, annualize a short result, or convert scale into throughput.
 Keep estimates, expected outcomes, measured results and shared contributions explicitly distinct.
-For generation and revision, use only exact approved wording. Better unapproved wording is a proposal
+For generation and revision, use only exact supported wording from approved phrasing or confirmed factual source statements. Confirmation of facts does not approve the packet. Better unapproved wording is a proposal
 for a human evidence-editing workflow, not a claim that may silently pass the factual gate.
 
 ## Titles and role presentation

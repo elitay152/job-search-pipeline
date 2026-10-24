@@ -37,3 +37,10 @@ class Store:
 
     def history(self):
         return [json.loads(r[0]) for r in self.db.execute('SELECT manifest FROM runs ORDER BY rowid DESC')]
+
+    def career_snapshot(self, run_id):
+        from .models import Career
+        row = self.db.execute("SELECT payload FROM events WHERE run_id=? AND stage='inputs' ORDER BY rowid LIMIT 1", (run_id,)).fetchone()
+        if not row:
+            raise ValueError('Run input snapshot unavailable')
+        return Career.model_validate(json.loads(row[0])['career'])

@@ -7,8 +7,12 @@ from typing import Protocol
 from .models import Career, Requirement, Packet, Finding, Settings
 from .providers import Gateway, PROMPT_VERSION
 from .store import Store, digest, now
+from .review import audit, reviews, document_plan, group_key
+from .grounding import accepted_assessments
 
 TOKENS = re.compile(r'[a-z0-9+#]+')
+NAMED_TOOLS = ('sql server', 'azure devops', 'azure data factory', 'azure sql', 'blob storage',
+               'power bi', 'kubernetes', 'terraform', 'nuget', 'npm', 'mosaic ai', 'unity catalog')
 STOP = {'the','a','an','and','of','to','in','with','for','is','you','we','required','preferred','must','have','experience','using'}
 
 def words(text):
@@ -19,19 +23,35 @@ def extract(jd):
         raise ValueError('Job description must contain 20–50,000 characters')
     requirements = []
     priority = 'ambiguous'
-    for line in re.split(r'[\n;]+', jd):
-        line = line.strip(' •-\t')
+    headings = {'qualifications': 'required', 'required qualifications': 'required',
+                'requirements': 'required', 'experience': 'required', 'education': 'preferred',
+                'preferred experience': 'preferred', 'preferred qualifications': 'preferred',
+                'key responsibilities': 'ambiguous', 'job description': 'ambiguous',
+                'knowledge, skills, and abilities': 'ambiguous'}
+    for raw in jd.splitlines():
+        line = raw.strip(' •-\t').strip()
         if not line:
             continue
-        low = line.lower()
-        if re.search(r'\b(required|requirements|must)\b', low):
-            priority = 'required'
-        elif re.search(r'\b(preferred|nice to have|bonus)\b', low):
-            priority = 'preferred'
-        if len(words(line)) < 1:
+        low = line.lower().rstrip(':')
+        if low in headings:
+            priority = headings[low]
             continue
+        if low in ('overview', 'position summary', 'role summary', 'about the job', 'attributes that will drive success'):
+            priority = 'ambiguous'
+            continue
+        if re.match(r'^(company|role|source|user-supplied posting url|url retrieval):', low):
+            continue
+        is_bullet = raw.lstrip().startswith(('-', '•', '*'))
+        explicit = re.search(r'\b(required|preferred|must|nice to have)\b', low)
+        if not is_bullet and not explicit and not low.startswith('location:'):
+            continue
+        local = priority
+        if re.search(r'\b(preferred|nice to have|bonus)\b', low):
+            local = 'preferred'
+        elif re.search(r'\b(required|must)\b', low):
+            local = 'required'
         requirements.append(Requirement(id=f'q{len(requirements)+1}', text=line, excerpt=line,
-            priority=priority, kind='constraint' if re.search(r'\b(remote|hybrid|onsite|salary|travel|authorization|location)\b', low) else 'skill'))
+            priority=local, kind='constraint' if re.search(r'\b(remote|hybrid|onsite|salary|travel|authorization|location)\b', low) else 'skill'))
     return requirements
 
 class Retriever(Protocol):
@@ -44,7 +64,7 @@ class LexicalRetriever:
         ranked = []
         for e in career.evidence:
             tags = words(' '.join(e.tags + [t.name for t in e.technologies]))
-            approved = words(' '.join(e.approved_wording))
+            approved = words(' '.join(e.supported_wording))
             score = 3*len(query & tags) + len(query & approved)
             if score:
                 ranked.append((e, score, query <= (tags | approved)))
@@ -58,52 +78,16 @@ def map_requirements(requirements, career, retriever=None):
             continue
         matches = retriever.retrieve(q, career)
         eligible = [m for m in matches if m[0].eligible]
+        named = [tool for tool in NAMED_TOOLS if re.search(r'(?<![a-z0-9])' + re.escape(tool) + r'(?![a-z0-9])', q.text.lower())]
+        if named:
+            # Shared brand words such as Azure do not establish a different named service.
+            eligible = [m for m in eligible if any(tool in (' '.join(m[0].supported_wording) + ' ' + ' '.join(t.name for t in m[0].technologies)).lower() for tool in named)]
         q.evidence_ids = [m[0].id for m in eligible]
         if eligible:
             q.classification = 'direct' if any(m[2] for m in eligible) else 'transferable'
-        elif matches:
+        elif matches and any(not m[0].eligible for m in matches):
             q.classification = 'needs_clarification'
     return requirements
-
-def audit(packet, career):
-    """Fail closed: IDs are necessary; exact approved wording is also required.
-
-    This deliberately rejects new paraphrases rather than claiming semantic entailment.
-    """
-    index = {e.id: e for e in career.evidence}
-    findings = []
-    for claim in packet.resume + packet.cover_letter:
-        linked = [index[i] for i in claim.evidence_ids if i in index]
-        valid = (len(linked) == len(claim.evidence_ids) and all(e.eligible for e in linked)
-                 and any(claim.text in e.approved_wording for e in linked)
-                 and all(claim.text in e.approved_wording for e in linked))
-        if not valid:
-            findings.append(Finding(role='evidence', claim_id=claim.id, evidence_ids=claim.evidence_ids,
-                severity='error', message='Claim is not exact approved wording supported by every linked, confirmed record.'))
-    if not packet.resume or not packet.cover_letter:
-        findings.append(Finding(role='evidence', severity='error', message='Resume and letter require factual content.'))
-    ids = [c.id for c in packet.resume + packet.cover_letter]
-    if len(ids) != len(set(ids)):
-        findings.append(Finding(role='evidence', severity='error', message='Claim IDs must be unique.'))
-    return findings
-
-def reviews(packet, requirements, career):
-    findings = audit(packet, career)
-    claims = packet.resume + packet.cover_letter
-    used = {i for c in claims for i in c.evidence_ids}
-    for q in requirements:
-        if q.classification in ('unsupported', 'needs_clarification'):
-            findings.append(Finding(role='recruiter', requirement_id=q.id, severity='gap',
-                message=f'{q.classification}: {q.text}'))
-        elif not used.intersection(q.evidence_ids):
-            findings.append(Finding(role='recruiter', requirement_id=q.id, severity='suggestion',
-                message='Presentation: relevant evidence is missing from the packet.'))
-    seen = set()
-    for c in packet.resume:  # Reusing a fact in the letter is expected.
-        if c.text in seen or re.search(r'\b(rockstar|ninja|world-class|passionate|synergy)\b', c.text, re.I):
-            findings.append(Finding(role='voice', claim_id=c.id, severity='suggestion', message='Review repetition or inflated language.'))
-        seen.add(c.text)
-    return findings
 
 def load_style(path):
     root = Path(path)
@@ -116,10 +100,35 @@ def load_style(path):
     guidance = guidance_file.read_text() if guidance_file.exists() else ''
     bundle = {'skill': skill, 'profile': profile, 'resume_guidance': guidance}
     return {'version': profile['version'], 'hash': digest(bundle),
-            'guidance_version': 'resume-guidance-v1' if guidance else None,
+            'guidance_version': (re.search(r'Version: (\S+)', guidance).group(1) if re.search(r'Version: (\S+)', guidance) else 'custom') if guidance else None,
             'instructions': skill + '\n' + guidance + '\n' + json.dumps(profile)}
 
-def run(jd, career, store=None, settings=None, style_path='writing_style', strategy='C'):
+def validate_review_contract(raw, role, packet, requirements, career, factual_mode):
+    """Malformed reviewer output is distinct from a supported negative factual verdict."""
+    parsed = [Finding.model_validate(f) for f in raw.get('findings', [])]
+    known = {c.id for c in packet.resume + packet.cover_letter}
+    qids = {q.id for q in requirements}
+    eids = {e.id for e in career.evidence}
+    for f in parsed:
+        if f.role != role:
+            raise ValueError('Reviewer returned findings for the wrong role')
+        if f.claim_id and f.claim_id not in known:
+            raise ValueError('Reviewer cited an unknown passage')
+        if f.requirement_id and f.requirement_id not in qids:
+            raise ValueError('Reviewer cited an unknown requirement')
+        if not set(f.evidence_ids) <= eids:
+            raise ValueError('Reviewer cited unknown evidence')
+        if not (f.claim_id or f.section or f.requirement_id):
+            raise ValueError('Reviewer finding must identify a passage, section or requirement')
+    receipt = set(raw.get('reviewed_claim_ids', []))
+    if role == 'evidence' and receipt != known:
+        raise ValueError('Evidence reviewer did not account for every claim')
+    if role == 'evidence' and factual_mode == 'model_reviewed':
+        accepted_assessments(packet, career, raw.get('assessments', []))
+    return parsed, receipt
+
+
+def run(jd, career, store=None, settings=None, style_path='writing_style', strategy='C', seed_packet=None):
     store = store or Store()
     settings = settings or Settings()
     style = load_style(style_path)
@@ -127,9 +136,11 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
     started = time.monotonic()
     manifest = {'id': run_id, 'created': now(), 'updated': now(), 'status': 'running',
         'input_hash': digest(jd), 'evidence_hash': digest(career.model_dump(mode='json')),
-        'prompt_version': PROMPT_VERSION, 'schema_version': '2', 'style': style,
+        'prompt_version': PROMPT_VERSION, 'schema_version': '4', 'style': style,
         'settings': settings.model_dump(), 'strategy': strategy, 'stages': [], 'versions': [],
-        'revision_count': 0, 'artifacts': [], 'approved': False}
+        'revision_count': 0, 'artifacts': [], 'approved': False,
+        'review_mode': settings.reviewer, 'generation_mode': settings.generator,
+        'seed_packet_hash': digest(seed_packet.model_dump()) if seed_packet else None}
     store.save(manifest)
     gateway = Gateway(store, settings)
     def stage(name, function):
@@ -137,47 +148,107 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
         try:
             result = function()
             manifest['stages'].append({'name': name, 'status': 'passed', 'latency': time.monotonic()-ts})
+            store.save(manifest)
             return result
         except Exception:
             manifest['stages'].append({'name': name, 'status': 'failed', 'latency': time.monotonic()-ts})
+            store.save(manifest)
             raise
     try:
+        store.event(run_id, 'inputs', {'jd': jd, 'career': career.model_dump(mode='json')})
         requirements = stage('extract', lambda: extract(jd))
         requirements = stage('retrieve', lambda: map_requirements(requirements, career))
         selected = {i for q in requirements for i in q.evidence_ids}
-        evidence = [e.model_dump(mode='json') for e in career.evidence if e.eligible and (strategy == 'A' or e.id in selected)]
+        # Document anchors are explicit: record omission must not hide publications, skills,
+        # or an otherwise relevant role simply because its vocabulary lost a top-k contest.
+        eligible = [e for e in career.evidence if e.eligible]
+        if strategy == 'A':
+            selected = {e.id for e in eligible}
+        else:
+            selected.update(e.id for e in eligible if e.kind in ('publication', 'education', 'skill'))
+            matched_groups = {group_key(e)
+                              for e in eligible if e.id in selected and e.kind == 'experience'}
+            for e in eligible:
+                if e.kind == 'experience' and group_key(e) in matched_groups:
+                    selected.add(e.id)
+        evidence = [e.model_dump(mode='json') for e in eligible if e.id in selected]
+        plan = document_plan(career, selected)
+        plan['pending_sources'] = [{'id': e.id, 'kind': e.kind} for e in career.evidence if not e.eligible]
+        manifest['document_plan'] = plan
         manifest['requirements'] = [q.model_dump() for q in requirements]
         manifest['discovery_questions'] = discovery_questions(requirements)
         manifest['selected_evidence'] = [e['id'] for e in evidence]
-        # Persist private snapshots locally, never log document contents to stdout.
-        store.event(run_id, 'inputs', {'jd': jd, 'career': career.model_dump(mode='json')})
+        manifest['excluded_evidence'] = [{'id': e.id, 'reason': 'uncertain_source' if not e.eligible else 'not_selected'}
+                                         for e in career.evidence if e.id not in selected or not e.eligible]
         payload = {'job_description': jd, 'requirements': manifest['requirements'], 'evidence': evidence,
-                   'style': style['instructions']}
-        packet = stage('generate', lambda: Packet.model_validate(gateway.call('generate', payload)))
+                   'style': style['instructions'], 'document_plan': plan, 'factual_mode': settings.factual_mode}
+        packet = seed_packet or stage('generate', lambda: Packet.model_validate(gateway.call('generate', payload)))
         seen = set()
         for revision in range(settings.max_revisions + 1):
             signature = digest(packet.model_dump())
-            findings = stage('validate', lambda: reviews(packet, requirements, career))
-            if strategy == 'C':
-                review = stage('review', lambda: gateway.call('review', dict(payload, packet=packet.model_dump())))
-                known_claims = {c.id for c in packet.resume + packet.cover_letter}
-                known_requirements = {q.id for q in requirements}
-                for raw in review.get('findings', []):
-                    f = Finding.model_validate(raw)
-                    if f.role == 'evidence' or f.severity == 'error':
-                        raise ValueError('Model reviewer may not substitute for deterministic auditor')
-                    if f.role == 'recruiter' and (f.claim_id not in known_claims or f.requirement_id not in known_requirements):
-                        continue
-                    if f.role == 'voice' and f.claim_id not in known_claims:
-                        continue
-                    findings.append(f)
-            version = {'number': revision, 'packet': packet.model_dump(), 'findings': [f.model_dump() for f in findings],
-                       'hash': signature, 'created': now()}
+            version = {'number': revision, 'packet': packet.model_dump(), 'findings': [],
+                       'reviews': {}, 'hash': signature, 'created': now()}
             manifest['versions'].append(version)
-            store.event(run_id, 'version', version)
             manifest['revision_count'] = revision
+            store.save(manifest)  # Save even if a reviewer fails before returning.
+            findings = stage('validate', lambda: reviews(packet, requirements, career, plan))
+            version['findings'] = [f.model_dump() for f in findings]
+            grounded = set()
+            if strategy == 'C':
+                for role in ('evidence', 'recruiter', 'voice'):
+                    version['reviews'][role] = {'status': 'running', 'provider': settings.reviewer,
+                                                'model': settings.reviewer_model, 'mode': settings.reviewer}
+                    store.save(manifest)
+                    role_payload = dict(payload, packet=packet.model_dump(), role=role,
+                        career=career.model_dump(mode='json'))
+                    try:
+                        def review_with_correction():
+                            attempts = version['reviews'][role].setdefault('attempts', [])
+                            request = role_payload
+                            for attempt in range(2):
+                                raw = gateway.call('review', request)
+                                try:
+                                    parsed, receipt = validate_review_contract(raw, role, packet, requirements, career, settings.factual_mode)
+                                except ValueError as exc:
+                                    attempts.append({'status': 'rejected', 'response': raw, 'error': str(exc)})
+                                    store.save(manifest)
+                                    if attempt or settings.reviewer == 'mock':
+                                        raise
+                                    request = dict(role_payload, contract_correction={
+                                        'error': str(exc),
+                                        'claim_ids': [c.id for c in packet.resume + packet.cover_letter],
+                                        'instruction': 'Return a complete corrected review for your assigned role. This corrects the response contract, never relaxes factual standards.'})
+                                else:
+                                    attempts.append({'status': 'accepted', 'response': raw})
+                                    return raw, parsed, receipt
+                        raw, parsed, receipt = stage('review_' + role, review_with_correction)
+                        if role == 'evidence' and settings.factual_mode == 'model_reviewed':
+                            version['support_assessments'] = raw.get('assessments', [])
+                            grounded, rejected = accepted_assessments(packet, career, version['support_assessments'])
+                            version['support_rejections'] = rejected
+                            findings = reviews(packet, requirements, career, plan, grounded)
+                            for ident, reasons in rejected.items():
+                                findings.append(Finding(role='evidence', claim_id=ident, severity='error',
+                                    code='grounding_rejected', message='; '.join(reasons)))
+                        findings.extend(parsed)
+                        version['reviews'][role].update(status='passed', findings=[f.model_dump() for f in parsed],
+                                                         reviewed_claim_ids=sorted(receipt))
+                    except Exception:
+                        version['reviews'][role]['status'] = 'failed'
+                        for record in reversed(manifest['stages']):
+                            if record['name'] == 'review_' + role:
+                                record['status'] = 'failed'
+                                break
+                        store.save(manifest)
+                        raise
+                    # Do not hide document-level objections just because a missing section
+                    # has no existing passage or requirement ID.
+                    version['findings'] = list({digest(f.model_dump()): f.model_dump() for f in findings}.values())
+                    store.save(manifest)
+            version['findings'] = list({digest(f.model_dump()): f.model_dump() for f in findings}.values())
+            store.event(run_id, 'version', version)
             store.save(manifest)
-            actionable = [f for f in findings if f.severity in ('error', 'suggestion')]
+            actionable = [f for f in version['findings'] if f['severity'] in ('error', 'suggestion')]
             if strategy != 'C' or not actionable:
                 manifest['stopping_reason'] = 'one_shot' if strategy != 'C' else 'material_issues_resolved'
                 break
@@ -186,14 +257,22 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                 break
             seen.add(signature)
             candidate = stage('revise', lambda: Packet.model_validate(gateway.call('revise', dict(payload,
-                packet=packet.model_dump(), findings=[f.model_dump() for f in actionable]))))
-            store.event(run_id, 'revision_candidate', {'packet': candidate.model_dump(), 'validation': [f.model_dump() for f in audit(candidate, career)]})
+                packet=packet.model_dump(), findings=actionable))))
+            store.event(run_id, 'revision_candidate', {'packet': candidate.model_dump(),
+                'validation': [f.model_dump() for f in audit(candidate, career)]})
             if digest(candidate.model_dump()) in seen:
                 manifest['stopping_reason'] = 'repeated_or_oscillating_output'
                 break
             packet = candidate
-        manifest['validation'] = [f.model_dump() for f in audit(packet, career)]
-        manifest['status'] = 'needs_review' if manifest['validation'] else 'draft'
+        final = manifest['versions'][-1]
+        final_packet = Packet.model_validate(final['packet'])
+        accepted = set()
+        if settings.factual_mode == 'model_reviewed':
+            accepted, _ = accepted_assessments(final_packet, career, final.get('support_assessments', []))
+        manifest['validation'] = [f.model_dump() for f in audit(final_packet, career, accepted)]
+        review_errors = [f for f in final['findings'] if f['severity'] == 'error']
+        manifest['status'] = 'needs_review' if manifest['validation'] or review_errors else 'draft'
+        manifest['unresolved_findings'] = final['findings']
     except Exception as exc:
         manifest['status'] = 'failed'
         manifest['error_type'] = type(exc).__name__

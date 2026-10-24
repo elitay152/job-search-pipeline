@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 from pydantic import ValidationError
-from .models import Career, Settings
+from .models import Career, Settings, Packet
 from .store import Store
 from .pipeline import run
 from .export import approve, export
@@ -16,8 +16,13 @@ def main():
     r.add_argument('--jd', required=True)
     r.add_argument('--career', required=True)
     r.add_argument('--style', default='writing_style')
-    r.add_argument('--generator', choices=['mock', 'anthropic'], default=os.getenv('GENERATOR_PROVIDER', 'mock'))
-    r.add_argument('--reviewer', choices=['mock', 'anthropic'], default=os.getenv('REVIEWER_PROVIDER', 'mock'))
+    r.add_argument('--generator', choices=['mock', 'anthropic', 'openai'], default=os.getenv('GENERATOR_PROVIDER', 'mock'))
+    r.add_argument('--reviewer', choices=['mock', 'anthropic', 'openai'], default=os.getenv('REVIEWER_PROVIDER', 'mock'))
+    r.add_argument('--factual-mode', choices=['strict','model_reviewed'], default=None)
+    r.add_argument('--seed-packet', help='Review and revise an existing structured packet, without bypassing gates')
+    r.add_argument('--generator-model', default=os.getenv('GENERATOR_MODEL'))
+    r.add_argument('--reviewer-model', default=os.getenv('REVIEWER_MODEL'))
+    r.add_argument('--report', help='Write a private Markdown reviewer report')
     r.add_argument('--max-revisions', type=int, default=2)
     for name in ('approve', 'export'):
         cmd = sub.add_parser(name)
@@ -29,6 +34,12 @@ def main():
             cmd.add_argument('--draft', action='store_true')
             cmd.add_argument('--output', default='artifacts')
     sub.add_parser('history')
+    inspect = sub.add_parser('inspect')
+    inspect.add_argument('run_id')
+    inspect.add_argument('--output', required=True)
+    imp = sub.add_parser('import-intake')
+    imp.add_argument('--intake', required=True)
+    imp.add_argument('--output', required=True)
     ev = sub.add_parser('evaluate')
     ev.add_argument('--output', default='local/evaluation.json')
     cal = sub.add_parser('calibrate')
@@ -40,11 +51,17 @@ def main():
         if args.command == 'run':
             career = Career.model_validate_json(Path(args.career).read_text())
             settings = Settings(generator=args.generator, reviewer=args.reviewer, max_revisions=args.max_revisions,
-                generator_model=os.getenv('GENERATOR_MODEL', 'claude-sonnet-4-5'),
-                reviewer_model=os.getenv('REVIEWER_MODEL', 'claude-sonnet-4-5'),
-                token_budget=int(os.getenv('TOKEN_BUDGET', '100000')),
-                max_calls=int(os.getenv('CALL_BUDGET', '24')))
-            m = run(Path(args.jd).read_text(), career, store, settings, args.style)
+                factual_mode=args.factual_mode or ('model_reviewed' if args.reviewer != 'mock' else 'strict'),
+                generator_model=args.generator_model,
+                reviewer_model=args.reviewer_model,
+                token_budget=int(os.getenv('TOKEN_BUDGET', '250000')),
+                max_calls=int(os.getenv('CALL_BUDGET', '48')))
+            seed = Packet.model_validate_json(Path(args.seed_packet).read_text()) if args.seed_packet else None
+            m = run(Path(args.jd).read_text(), career, store, settings, args.style, seed_packet=seed)
+            if args.report:
+                from .report import review_report
+                Path(args.report).parent.mkdir(parents=True, exist_ok=True)
+                Path(args.report).write_text(review_report(m, career))
             print(json.dumps({k: m[k] for k in ('id','status','revision_count','stopping_reason','latency')}))
         elif args.command in ('approve', 'export'):
             career = Career.model_validate_json(Path(args.career).read_text())
@@ -52,6 +69,15 @@ def main():
                 print(approve(store, args.run_id, career, args.reviewed)['status'])
             else:
                 print('\n'.join(str(x) for x in export(store, args.run_id, career, args.output, args.draft)))
+        elif args.command == 'import-intake':
+            from .intake import import_intake
+            result = import_intake(args.intake, args.output)
+            print(json.dumps({'eligible': sum(e.eligible for e in result.evidence), 'records': len(result.evidence)}))
+        elif args.command == 'inspect':
+            from .report import review_report
+            Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+            Path(args.output).write_text(review_report(store.get(args.run_id), store.career_snapshot(args.run_id)))
+            print('Private review report saved')
         elif args.command == 'history':
             print(json.dumps([{k: m[k] for k in ('id','created','status','latency','estimated_cost')} for m in store.history()], indent=2))
         elif args.command == 'evaluate':
