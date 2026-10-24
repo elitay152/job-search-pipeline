@@ -1,0 +1,13 @@
+{
+  "version": "example-neutral-v1",
+  "approved": true,
+  "basis": "Generic neutral baseline for the synthetic walkthrough only; not derived from personal samples and not evidence of any user's approval or learned voice.",
+  "sentence_length": "Prefer clear sentences of roughly 15–25 words; keep necessary technical qualifiers.",
+  "directness": "Lead with the action or main point, followed by concrete implementation detail.",
+  "paragraphs": "One main idea per cover-letter paragraph, usually two or three sentences; concise resume bullets.",
+  "technical_detail": "Describe actual tool use and supported outcomes rather than listing keywords.",
+  "confidence": "Be specific about confirmed work; retain estimates, uncertainty and ownership boundaries.",
+  "avoid": ["rockstar", "ninja", "world-class", "unsupported guarantees", "generic declarations of excellence"],
+  "samples": [],
+  "calibration_status": "Generic demonstration; no personal voice matching claimed."
+}

@@ -76,9 +76,16 @@ The Streamlit provider selectors use the same API key; model overrides and detai
 
 ## Writing profile calibration
 
-`writing_style/` is a portable package: SKILL.md, versioned neutral profile, labeled optional examples and calibration instructions. The application explicitly loads this skill; arbitrary SKILL.md discovery by Claude Code is not assumed. No user samples were supplied, so the current profile is clearly a neutral default.
+`writing_style/` is a portable package: SKILL.md, versioned neutral profile, labeled optional examples and calibration instructions. The application explicitly loads this skill; arbitrary SKILL.md discovery by Claude Code is not assumed. The public profile is a labeled neutral default; personal samples and profiles belong in ignored private storage.
 
 Put selected samples and a manifest under ignored `private/`. Label authorship `user-authored`, `assistant-assisted`, or `explicitly-user-approved`; assistant-assisted samples alone cannot establish the user's voice. Follow [calibration.md](writing_style/calibration.md) to generate an unapproved proposal, inspect its sentence-length observations and synthetic before/after illustration, edit, approve and version it. Calibration is intentionally local and limited; it does not claim to learn personality or a full voice model. Raw examples are never loaded as pipeline instructions. Conversational style remains separate from professional style.
+
+Use the [private-profile workflow](writing_style/private_profiles.md) to approve and version a
+personal package, load it explicitly with `--style`, understand what live providers receive, and
+back it up privately. A [generic profile example](writing_style/examples/profile.generic.example.json)
+supports a credential-free walkthrough without publishing anyone's writing. Sample approval and
+profile approval are separate. The UI currently uses the neutral default; custom profiles are
+selected through CLI/Python, not automatically from local selection notes.
 
 ## Evaluation and tests
 
