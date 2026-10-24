@@ -1,5 +1,5 @@
 # Evidence-grounded resume development
-Version: resume-guidance-v1
+Version: resume-guidance-v3
 Adapted only from ResumeSkills and resume-tailoring-skill; attribution and MIT licenses in SOURCES.md.
 General professional guidance is not a learned user voice. Detailed workflow: docs/resume-development.md.
 
@@ -15,8 +15,9 @@ BULLETS: Prefer action + actual tool use + supported outcome or scope. Usually o
 lines; prioritize accuracy over length. Remove filler, repetition and forced keywords.
 A useful bullet need not contain a number. Never invent, lower, annualize or otherwise adjust metrics.
 Preserve estimated/expected/realized qualifiers and distinguish scale from throughput and shared
-contributions from ownership. Generation and revision use exact approved wording only; new wording
-is a human-reviewed evidence proposal, never a way around factual validation.
+contributions from ownership. In strict mode, use exact approved phrasing or confirmed factual source statements. In live-reviewed
+mode, paraphrases require separate evidence-auditor assessments and exact quotes, plus deterministic
+factual checks. No style edit may add facts. Confirming facts does not approve the application packet.
 
 TITLES: Retain official titles as facts. Use separate descriptive resume titles only when explicitly
 user-approved; never infer them from the target job. Do not imply unsupported seniority, management

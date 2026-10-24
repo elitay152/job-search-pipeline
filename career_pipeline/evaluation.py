@@ -8,7 +8,7 @@ from .pipeline import run
 from .store import Store
 
 def judge(packet, career, expected_requirements):
-    allowed = {e.id: set(e.approved_wording) for e in career.evidence if e.eligible}
+    allowed = {e.id: set(e.supported_wording) for e in career.evidence if e.eligible}
     claims = packet['resume'] + packet['cover_letter']
     valid = [all(c['text'] in allowed.get(i, set()) for i in c['evidence_ids']) and bool(c['evidence_ids']) for c in claims]
     # Gold requirement IDs and supporting IDs are manually labeled in the synthetic benchmark.

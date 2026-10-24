@@ -84,7 +84,7 @@ def test_revision_limit_and_factual_gate(monkeypatch, career, store, tmp_path):
     count = {'value':0}
     def malicious(self, task, payload, model):
         if task == 'review':
-            return {'findings':[]}
+            return {'findings':[], 'reviewed_claim_ids':[c['id'] for c in payload['packet']['resume'] + payload['packet']['cover_letter']]}
         count['value'] += 1
         return {'resume':[{'id':'r1','text':f'Led {count["value"]} engineers','evidence_ids':['ev-pipeline']}],
                 'cover_letter':[{'id':'c1','text':'Invented outcome','evidence_ids':['ev-pipeline']}]}
@@ -103,7 +103,7 @@ def test_revision_limit_and_factual_gate(monkeypatch, career, store, tmp_path):
 def test_repeated_output_stops(monkeypatch, career, store):
     original = MockProvider.complete
     def provider(self, task, payload, model):
-        if task == 'review':
+        if task == 'review' and payload['role'] == 'voice':
             return {'findings':[{'role':'voice','claim_id':'r1','severity':'suggestion','message':'Make clearer'}]}
         return original(self, task, payload, model)
     monkeypatch.setattr(MockProvider, 'complete', provider)
@@ -114,7 +114,7 @@ def test_repeated_output_stops(monkeypatch, career, store):
 def test_reviewer_cannot_invent(monkeypatch, career, store):
     original = MockProvider.complete
     def provider(self, task, payload, model):
-        if task == 'review':
+        if task == 'review' and payload['role'] == 'recruiter':
             return {'findings':[{'role':'recruiter','claim_id':'r1','requirement_id':'q1','severity':'suggestion',
                 'message':'Add an attractive but unsupported Kubernetes leadership accomplishment'}]}
         return original(self, task, payload, model)
@@ -201,7 +201,7 @@ def test_loaded_guidance_is_versioned_and_changes_hash(tmp_path):
     for name in ('SKILL.md', 'profile.json', 'resume_guidance.md'):
         (root/name).write_text((Path('writing_style')/name).read_text())
     first = load_style(root)
-    assert first['guidance_version'] == 'resume-guidance-v1'
+    assert first['guidance_version'] == 'resume-guidance-v3'
     assert 'A useful bullet need not contain a number' in first['instructions']
     (root/'resume_guidance.md').write_text('Updated trusted resume guidance')
     second = load_style(root)
@@ -217,4 +217,4 @@ def test_gap_discovery_is_nonleading_and_not_automatic_evidence(career, store):
     assert not missing['generation_eligible']
     assert missing['answer_status'] == 'unanswered'
     assert 'Kubernetes' not in json.dumps(m['versions'][-1]['packet'])
-    assert m['style']['guidance_version'] == 'resume-guidance-v1'
+    assert m['style']['guidance_version'] == 'resume-guidance-v3'

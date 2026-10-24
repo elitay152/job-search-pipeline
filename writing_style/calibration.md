@@ -16,7 +16,7 @@ credential-free walkthrough, provider-transmission boundaries and private backup
    create a new versioned private package containing SKILL.md, profile.json, resume_guidance.md,
    SOURCES.md and licenses/. Set approved=true and a distinct profile version only for that package.
 5. Pass `--style private/writing_style/approved-v1` explicitly for personal CLI runs. The Python
-   equivalent is `style_path=...`. The UI currently uses the public neutral default. An active-profile
+   equivalent is `style_path=...`. The UI also accepts an explicit approved-style directory. An active-profile
    note does not select a profile automatically. Each run stores version, instructions and bundle hash.
 6. Preserve prior packages and approval notes. Back up private files separately; Git ignores them.
 

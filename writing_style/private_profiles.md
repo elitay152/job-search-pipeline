@@ -94,9 +94,7 @@ approval does not make an unconverted intake draft generation-ready. Python call
 directory through `run(..., style_path="private/writing_style/approved-v1")`.
 
 Profiles are **not auto-discovered**. A local file named `active-profile.json` can be a human-readable
-selection note but does not change application behavior. The Streamlit UI currently uses the
-public neutral profile and has no custom-profile selector; use the CLI/Python interface for a
-private profile. Run manifests retain profile version, loaded instructions and a combined hash
+selection note but does not change application behavior. The Streamlit UI also accepts an explicit approved-style directory and local evidence JSON path. Run manifests retain profile version, loaded instructions and a combined hash
 of SKILL.md, profile.json and resume_guidance.md. This makes selections inspectable and invalidates
 stage-cache inputs when guidance changes; it does not promise identical live regeneration.
 
