@@ -286,6 +286,7 @@ with apply_tab:
         minimum_letter_words = st.number_input('Preferred minimum cover-letter words (0 disables)', 0, 400, 0)
         cycles = st.number_input('Maximum revision cycles', 0, 3, 2)
         token_budget = st.number_input('Token budget', min_value=1000, value=250000)
+        output_limit = st.number_input('Maximum output tokens per call', min_value=256, max_value=16000, value=6000, help='Separate from the total budget. A truncated response can require a larger per-call allowance.')
         call_budget = st.number_input('Call budget (includes retry reservations)', min_value=1, max_value=100, value=48)
     problems = [message for p in set((generator, reviewer)) if (message := configuration_problem(p))]
     for message in problems:
@@ -295,7 +296,7 @@ with apply_tab:
             with st.spinner('Matching evidence, writing and reviewing your application…'):
                 m = run(jd, career, store, Settings(generator=generator, reviewer=reviewer, factual_mode=factual_mode,
                     generator_model=generator_model, reviewer_model=reviewer_model, max_revisions=cycles,
-                    token_budget=token_budget, max_calls=call_budget, content_quality=ContentQualitySettings(enabled=quality_enabled,
+                    token_budget=token_budget, max_calls=call_budget, max_output_tokens=output_limit, content_quality=ContentQualitySettings(enabled=quality_enabled,
                         minimum_bullet_words=minimum_bullet_words, minimum_letter_words=minimum_letter_words)), style_path=style_path)
             st.session_state.run_id = m['id']
             st.success('Your draft is ready. Open Review & download to inspect it.')
@@ -315,6 +316,11 @@ with review_tab:
             index=ids.index(st.session_state.get('run_id')) if st.session_state.get('run_id') in ids else 0)
         m = store.get(selected)
         st.subheader(m['status'].replace('_', ' ').title())
+        if m.get('failure'):
+            st.error('Stopped at ' + m['failure']['stage'] + ': ' + m['failure']['message'])
+            st.download_button('Download diagnostic summary', json.dumps({'run_id': m['id'], 'failure': m['failure'], 'stages': m['stages']}, indent=2), 'run-diagnostic.json', 'application/json')
+        elif m['status'] == 'failed':
+            st.warning('This older run has no detailed failure diagnostic. Its stages and saved review attempts remain in Technical audit details.')
         st.caption(f"{m['revision_count']} revision cycles · {m.get('latency', 0):.1f} seconds · {m.get('stopping_reason', 'running').replace('_', ' ')}")
         if m['settings']['reviewer'] == 'mock':
             st.warning('Practice output copies evidence statements to test the workflow. It is not a professionally tailored resume. Choose Use OpenAI or Use Anthropic in Create application for composed documents and live reviews.')

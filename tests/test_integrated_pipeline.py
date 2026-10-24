@@ -382,3 +382,14 @@ def test_intake_scopes_each_education_record_to_its_own_degree(tmp_path):
         assert evidence.eligible
     assert 'in progress; dissertation phase' in result.evidence[-1].confirmed_statements[0]
     assert len({e.id for e in result.evidence})==3
+
+
+def test_failed_run_persists_safe_stage_diagnostic(monkeypatch,career,store):
+    def broken(*args,**kwargs):
+        raise ValueError('OpenAI response incomplete; no candidate or review accepted')
+    monkeypatch.setattr(MockProvider,'complete',broken)
+    with pytest.raises(ValueError):run(JD,career,store)
+    failure=store.history()[0]['failure']
+    assert failure['stage']=='generate'
+    assert failure['code']=='response_incomplete'
+    assert 'per-call output limit' in failure['message']

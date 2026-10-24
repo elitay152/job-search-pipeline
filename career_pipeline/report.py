@@ -8,6 +8,8 @@ def review_report(manifest, career):
     lines = [f"# Pipeline run {manifest['id']}", f"Status: {manifest['status']}",
         f"Generator: {manifest['settings']['generator']} / Reviewer: {manifest['settings']['reviewer']}",
         f"Stopping reason: {manifest.get('stopping_reason', 'running')}"]
+    if manifest.get('failure'):
+        lines += [f"Stopped at {manifest['failure']['stage']}: {manifest['failure']['message']}"]
     if manifest['settings']['reviewer'] == 'mock':
         lines += ['**MOCK — deterministic software validation, not a live adversarial model review.**']
     packet = Packet.model_validate(manifest['versions'][-1]['packet']) if manifest['versions'] else None

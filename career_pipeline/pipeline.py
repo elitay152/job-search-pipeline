@@ -11,6 +11,7 @@ from .review import audit, reviews, document_plan, group_key
 from .grounding import accepted_assessments
 from .composition import build_composition_plan
 from .content_quality import check_content_quality
+from .diagnostics import failure_details
 
 TOKENS = re.compile(r'[a-z0-9+#]+')
 NAMED_TOOLS = ('sql server', 'azure devops', 'azure data factory', 'azure sql', 'blob storage',
@@ -147,6 +148,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
     store.save(manifest)
     gateway = Gateway(store, settings)
     def stage(name, function):
+        manifest['active_stage'] = name
         ts = time.monotonic()
         try:
             result = function()
@@ -285,6 +287,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
     except Exception as exc:
         manifest['status'] = 'failed'
         manifest['error_type'] = type(exc).__name__
+        manifest['failure'] = dict(failure_details(exc), stage=manifest.get('active_stage', 'setup'))
         manifest['stopping_reason'] = 'stage_failure'
         raise
     finally:
