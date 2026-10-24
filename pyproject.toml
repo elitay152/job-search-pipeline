@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "career-evidence-pipeline"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.9,<3", "python-docx>=1.1,<2", "streamlit>=1.40,<2", "anthropic>=0.40,<1"]
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+[project.scripts]
+career = "career_pipeline.cli:main"
+[tool.setuptools.packages.find]
+include = ["career_pipeline*"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]

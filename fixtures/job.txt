@@ -1,0 +1,6 @@
+Data Engineer
+Required: Python and SQL batch ingestion
+Required: data quality checks
+Required: Kubernetes production administration
+Preferred: Airflow orchestration
+Location: hybrid, two days onsite
