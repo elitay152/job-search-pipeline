@@ -51,7 +51,7 @@ confirmed evidence + approved profile -> provider -> structured packet
 
 - `models.py`: employers, official titles/dates, projects, personal actions, ownership, technology usage, qualified metrics, sources, verification, approved wording and prohibited inferences. IDs must be stable and unique. Conflicting dates for the same employer/title are rejected. Unconfirmed evidence is ineligible.
 - `pipeline.py`: framework-independent orchestration. Requirement extraction is a transparent line/heading baseline, with required/preferred/ambiguous labels and verbatim excerpts. Location and practical constraints require clarification; no sensitive personal characteristics are inferred. Retrieval is a replaceable protocol, currently tag and lexical overlap. “Direct” means all non-stopword tokens match available evidence text/tags; “transferable” means partial overlap, **not** a semantic certification. Inspect the map for multi-tool or nuanced requirements.
-- `providers.py`: provider protocol, deterministic mock, Anthropic and OpenAI Responses adapters. Generator/reviewer settings are separate. Approved style instructions are loaded explicitly. Job descriptions, evidence, and reviewer messages remain data in prompts; generated facts still face a deterministic gate. The model reviewer cannot replace the factual auditor. Recruiter objections must reference a known claim and requirement; voice objections require a known claim.
+- `providers.py`: provider protocol, deterministic mock, Anthropic and OpenAI Chat Completions adapters. Generator/reviewer settings are separate. Approved style instructions are loaded explicitly. Job descriptions, evidence, and reviewer messages remain data in prompts; generated facts still face a deterministic gate. The model reviewer cannot replace the factual auditor. Recruiter objections must reference a known claim and requirement; voice objections require a known claim.
 - `store.py`: SQLite run manifests, input snapshots, version events, rejected revision candidates, and content-addressed stage cache. Cache keys include provider/model, prompt version, settings and full stage payload. Manifests include hashes, schema/prompt/profile versions, model settings, stage latency/status, available usage/cost, revisions, stopping reason, validation, artifact paths and checksums. SQLite contains private content; stdout does not print snapshots.
 - `export.py`: Markdown/DOCX renderer uses official employment metadata with separately user-approved descriptive display titles, excludes internal IDs from application files, and writes a separate audit report. PDF is an optional capability stub returning an explicit unavailable result; no rendering dependency is required.
 
@@ -169,7 +169,7 @@ export REVIEWER_PROVIDER=openai
   --style private/writing_style/approved-v1 --report private/openai-review.md
 ```
 
-The adapter uses the official OpenAI SDK Responses API with strict function-result schemas,
+The adapter uses the official OpenAI SDK Chat Completions API with strict function-result schemas,
 separate reviewer-role prompts, bounded transient retries and actual reported token usage. All
 existing factual/semantic assessment and final approval gates apply to OpenAI too. Tests use
 mocked HTTP transport; they do not establish live authentication or response quality.

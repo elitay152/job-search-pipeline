@@ -103,6 +103,31 @@ def load_style(path):
             'guidance_version': (re.search(r'Version: (\S+)', guidance).group(1) if re.search(r'Version: (\S+)', guidance) else 'custom') if guidance else None,
             'instructions': skill + '\n' + guidance + '\n' + json.dumps(profile)}
 
+def validate_review_contract(raw, role, packet, requirements, career, factual_mode):
+    """Malformed reviewer output is distinct from a supported negative factual verdict."""
+    parsed = [Finding.model_validate(f) for f in raw.get('findings', [])]
+    known = {c.id for c in packet.resume + packet.cover_letter}
+    qids = {q.id for q in requirements}
+    eids = {e.id for e in career.evidence}
+    for f in parsed:
+        if f.role != role:
+            raise ValueError('Reviewer returned findings for the wrong role')
+        if f.claim_id and f.claim_id not in known:
+            raise ValueError('Reviewer cited an unknown passage')
+        if f.requirement_id and f.requirement_id not in qids:
+            raise ValueError('Reviewer cited an unknown requirement')
+        if not set(f.evidence_ids) <= eids:
+            raise ValueError('Reviewer cited unknown evidence')
+        if not (f.claim_id or f.section or f.requirement_id):
+            raise ValueError('Reviewer finding must identify a passage, section or requirement')
+    receipt = set(raw.get('reviewed_claim_ids', []))
+    if role == 'evidence' and receipt != known:
+        raise ValueError('Evidence reviewer did not account for every claim')
+    if role == 'evidence' and factual_mode == 'model_reviewed':
+        accepted_assessments(packet, career, raw.get('assessments', []))
+    return parsed, receipt
+
+
 def run(jd, career, store=None, settings=None, style_path='writing_style', strategy='C', seed_packet=None):
     store = store or Store()
     settings = settings or Settings()
@@ -177,25 +202,26 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                     role_payload = dict(payload, packet=packet.model_dump(), role=role,
                         career=career.model_dump(mode='json'))
                     try:
-                        raw = stage('review_' + role, lambda: gateway.call('review', role_payload))
-                        parsed = [Finding.model_validate(f) for f in raw.get('findings', [])]
-                        known = {c.id for c in packet.resume + packet.cover_letter}
-                        qids = {q.id for q in requirements}
-                        eids = {e.id for e in career.evidence}
-                        for f in parsed:
-                            if f.role != role:
-                                raise ValueError('Reviewer returned findings for the wrong role')
-                            if f.claim_id and f.claim_id not in known:
-                                raise ValueError('Reviewer cited an unknown passage')
-                            if f.requirement_id and f.requirement_id not in qids:
-                                raise ValueError('Reviewer cited an unknown requirement')
-                            if not set(f.evidence_ids) <= eids:
-                                raise ValueError('Reviewer cited unknown evidence')
-                            if not (f.claim_id or f.section or f.requirement_id):
-                                raise ValueError('Reviewer finding must identify a passage, section or requirement')
-                        receipt = set(raw.get('reviewed_claim_ids', []))
-                        if role == 'evidence' and receipt != known:
-                            raise ValueError('Evidence reviewer did not account for every claim')
+                        def review_with_correction():
+                            attempts = version['reviews'][role].setdefault('attempts', [])
+                            request = role_payload
+                            for attempt in range(2):
+                                raw = gateway.call('review', request)
+                                try:
+                                    parsed, receipt = validate_review_contract(raw, role, packet, requirements, career, settings.factual_mode)
+                                except ValueError as exc:
+                                    attempts.append({'status': 'rejected', 'response': raw, 'error': str(exc)})
+                                    store.save(manifest)
+                                    if attempt or settings.reviewer == 'mock':
+                                        raise
+                                    request = dict(role_payload, contract_correction={
+                                        'error': str(exc),
+                                        'claim_ids': [c.id for c in packet.resume + packet.cover_letter],
+                                        'instruction': 'Return a complete corrected review for your assigned role. This corrects the response contract, never relaxes factual standards.'})
+                                else:
+                                    attempts.append({'status': 'accepted', 'response': raw})
+                                    return raw, parsed, receipt
+                        raw, parsed, receipt = stage('review_' + role, review_with_correction)
                         if role == 'evidence' and settings.factual_mode == 'model_reviewed':
                             version['support_assessments'] = raw.get('assessments', [])
                             grounded, rejected = accepted_assessments(packet, career, version['support_assessments'])

@@ -12,11 +12,11 @@ from career_pipeline.store import Store
 
 
 def response(result,status='completed'):
-    return {'id':'resp_synthetic','object':'response','created_at':0,'status':status,'model':'gpt-4.1',
-        'output':[{'type':'function_call','id':'fc_synthetic','call_id':'call_synthetic',
-                   'name':'return_result','arguments':json.dumps(result)}],
-        'usage':{'input_tokens':30,'output_tokens':20,'total_tokens':50,
-                 'input_tokens_details':{'cached_tokens':0},'output_tokens_details':{'reasoning_tokens':0}}}
+    return {'id':'chatcmpl_synthetic','object':'chat.completion','created':0,'model':'gpt-4.1',
+        'choices':[{'index':0,'finish_reason':'tool_calls' if status=='completed' else 'length',
+            'message':{'role':'assistant','content':None,'tool_calls':[{'id':'call_synthetic',
+                'type':'function','function':{'name':'return_result','arguments':json.dumps(result)}}]}}],
+        'usage':{'prompt_tokens':30,'completion_tokens':20,'total_tokens':50}}
 
 
 def install_transport(monkeypatch,handler):
@@ -31,13 +31,16 @@ def install_transport(monkeypatch,handler):
 def test_openai_generation_and_all_review_roles(monkeypatch):
     calls=[]
     def handler(request):
-        assert request.url.path=='/v1/responses'
+        assert request.url.path=='/v1/chat/completions'
         body=json.loads(request.content);calls.append(body)
-        assert body['tools'][0]['strict'] is True
-        assert body['tool_choice']=={'type':'function','name':'return_result'}
-        assert 'APPROVED_STYLE' not in body['input'][0]['content']
-        assert 'APPROVED_STYLE' in body['instructions']
-        task=json.loads(body['input'][0]['content'])['task']
+        assert body['tools'][0]['function']['strict'] is True
+        assert body['tool_choice']=={'type':'function','function':{'name':'return_result'}}
+        assert 'APPROVED_STYLE' not in body['messages'][1]['content']
+        assert 'APPROVED_STYLE' in body['messages'][0]['content']
+        task=json.loads(body['messages'][1]['content'])['task']
+        if task=='review':
+            role=json.loads(body['messages'][1]['content'])['data']['role']
+            assert body['tools'][0]['function']['parameters']['$defs']['Finding']['properties']['role']['enum']==[role]
         result=({'findings':[],'reviewed_claim_ids':['r1','c1'],'assessments':[]}
                  if task=='review' else {'resume':[{'id':'r1','text':'Built synthetic pipelines.','evidence_ids':['e1']}],
                     'cover_letter':[{'id':'c1','text':'Built synthetic pipelines.','evidence_ids':['e1']}],'skills':[]})
@@ -49,9 +52,9 @@ def test_openai_generation_and_all_review_roles(monkeypatch):
         result=OpenAIProvider().complete('review',{'style':'APPROVED_STYLE','role':role},'gpt-4.1')
         assert result['input_tokens']==30 and result['output_tokens']==20
     assert len(calls)==4
-    assert 'adversarial evidence auditor' in calls[1]['instructions']
-    assert 'skeptical recruiter' in calls[2]['instructions']
-    assert 'voice editor' in calls[3]['instructions']
+    assert 'adversarial evidence auditor' in calls[1]['messages'][0]['content']
+    assert 'skeptical recruiter' in calls[2]['messages'][0]['content']
+    assert 'voice editor' in calls[3]['messages'][0]['content']
 
 
 def test_strict_schema_closes_all_objects_without_mutating_original():
@@ -110,7 +113,7 @@ def test_openai_routes_through_pipeline_and_approval_gate(monkeypatch,tmp_path):
     called=[]
     def handler(request):
         body=json.loads(request.content)
-        envelope=json.loads(body['input'][0]['content'])
+        envelope=json.loads(body['messages'][1]['content'])
         payload=envelope['data'];payload['style']='synthetic approved guidance'
         called.append((envelope['task'],payload.get('role')))
         result=MockProvider().complete(envelope['task'],payload,'synthetic-model')
@@ -127,3 +130,11 @@ def test_openai_routes_through_pipeline_and_approval_gate(monkeypatch,tmp_path):
     assert all(t['input_tokens']==30 and t['output_tokens']==20 for t in m['telemetry'])
     approve(store,m['id'],career,True)
     assert store.get(m['id'])['approved']
+
+
+def test_complete_tool_result_with_stop_reason(monkeypatch):
+    result={"resume":[],"cover_letter":[],"skills":[]}
+    body=response(result)
+    body["choices"][0]["finish_reason"]="stop"
+    install_transport(monkeypatch,lambda _:httpx.Response(200,json=body))
+    assert OpenAIProvider().complete("generate",{},"gpt-4.1")["result"]==result

@@ -14,6 +14,9 @@ def review_report(manifest, career):
         lines += [f"## Version {version['number']}"]
         for role, receipt in version.get('reviews', {}).items():
             lines += [f"{role}: {receipt['status']} ({receipt['provider']})"]
+            for attempt in receipt.get('attempts', []):
+                if attempt['status'] == 'rejected':
+                    lines += [f"Response contract rejected: {attempt['error']} (retained in run manifest)."]
         for f in version['findings']:
             target = f.get('claim_id') or f.get('section') or f.get('requirement_id') or 'packet'
             lines += [f"- [{f['severity']}] {f['role']} / {target}: {f['message']}"]

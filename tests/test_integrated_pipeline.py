@@ -312,3 +312,47 @@ def test_scope_and_credential_upgrades_rejected(statement,claim_text,context):
     claim=Claim(id='r1',text=claim_text,evidence_ids=['e0'])
     accepted,rejected=accepted_assessments(Packet(resume=[claim],cover_letter=[]),career,[assessment(claim,statement)])
     assert not accepted and rejected
+
+@pytest.mark.parametrize('persistent',[False,True])
+def test_live_review_contract_correction_is_bounded_and_saved(monkeypatch,career,store,persistent):
+    from career_pipeline.providers import OpenAIProvider
+    calls=[]
+    def complete(self,task,payload,model,max_tokens=6000):
+        result=MockProvider().complete(task,payload,model)
+        if task=='review' and payload['role']=='evidence':
+            calls.append(payload)
+            if persistent or len(calls)==1:
+                result['reviewed_claim_ids']=[c['id'] for c in payload['packet']['resume']]
+        return {'result':result,'input_tokens':100,'output_tokens':50}
+    monkeypatch.setattr(OpenAIProvider,'complete',complete)
+    settings=Settings(generator='openai',reviewer='openai',max_revisions=0)
+    if persistent:
+        with pytest.raises(ValueError,match='every claim'):run(JD,career,store,settings)
+        m=store.history()[0]
+        assert m['status']=='failed'
+        with pytest.raises(ValueError):approve(store,m['id'],career,True)
+    else:
+        m=run(JD,career,store,settings)
+        assert m['versions'][0]['reviews']['evidence']['status']=='passed'
+    assert len(calls)==2
+    assert 'contract_correction' in calls[1]
+    attempts=m['versions'][0]['reviews']['evidence']['attempts']
+    assert attempts[0]['status']=='rejected'
+    assert attempts[0]['response']['reviewed_claim_ids']
+    assert attempts[1]['status']==('rejected' if persistent else 'accepted')
+    assert len([t for t in m['telemetry'] if t.get('role')=='evidence'])==2
+
+
+def test_live_negative_verdict_is_not_retried_or_waived(monkeypatch,career,store):
+    from career_pipeline.providers import OpenAIProvider
+    def complete(self,task,payload,model,max_tokens=6000):
+        result=MockProvider().complete(task,payload,model)
+        if task=='review' and payload['role']=='evidence':
+            result['findings'].append({'role':'evidence','claim_id':payload['packet']['resume'][0]['id'],
+                'severity':'error','code':'unsupported_scope','message':'Scope is unsupported.'})
+        return {'result':result,'input_tokens':100,'output_tokens':50}
+    monkeypatch.setattr(OpenAIProvider,'complete',complete)
+    m=run(JD,career,store,Settings(generator='openai',reviewer='openai',max_revisions=0))
+    assert m['status']=='needs_review'
+    assert len(m['versions'][0]['reviews']['evidence']['attempts'])==1
+    with pytest.raises(ValueError):approve(store,m['id'],career,True)

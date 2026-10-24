@@ -149,7 +149,7 @@ claims of live recruiter judgment, document pagination quality or hiring outcome
 
 OpenAI is supported for both generation and review. Select `--generator openai --reviewer openai`;
 provider-aware defaults choose `gpt-4.1`, or supply accessible model IDs explicitly. OpenAI uses
-Responses API strict function schemas; all reviewer receipts, quote/metric/ownership checks,
+Chat Completions API strict function schemas; all reviewer receipts, quote/metric/ownership checks,
 revision bounds, usage tracking and final user-approval gates remain active. There is no fallback
 to mock or another live provider when authentication fails.
 
@@ -163,3 +163,11 @@ No key value belongs in commands, code, logs, reports or chat.
 The UI honors GENERATOR_PROVIDER/REVIEWER_PROVIDER as initial selections and keeps model defaults
 separate by provider. A synthetic API check must succeed before personal data is sent. Unit tests
 exercise the real SDK through mocked HTTP and do not prove live access or account billing status.
+
+Reviewer response contracts are checked separately from factual judgments. A live reviewer that
+omits a claim from its evidence inspection receipt, mixes roles, or cites invalid identifiers gets
+at most one correction request for that stage. Both responses and the rejection reason are saved
+in the version's review `attempts`; calls share the run's existing call/token budget and telemetry.
+A second malformed response fails the run and blocks approval. Unsupported wording, fabricated
+quotes and negative factual assessments remain findings for bounded document revision; they are
+never waived by this response correction. Transport/authentication failures are not contract retries.
