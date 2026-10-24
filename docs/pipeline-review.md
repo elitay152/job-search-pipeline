@@ -24,7 +24,8 @@ Confirmed factual statements and user-approved application wording are distinct:
   as source-confirmation gaps. In particular, a source-only publication is not silently verified.
 - Review of the final packet remains a separate user action. No importer or mock pass approves it.
 
-For live-supported paraphrases, set `Settings(reviewer="anthropic", factual_mode="model_reviewed")`.
+For live-supported paraphrases, set `Settings(reviewer="anthropic", factual_mode="model_reviewed")`
+or use `reviewer="openai"` with the same factual mode.
 CLI/UI select that mode by default when a live reviewer is chosen; `--factual-mode strict` remains
 available. The evidence reviewer must supply an assessment for every paraphrased claim, exact quotes
 from every cited record, and explicit checks for wording, metrics, technology, ownership, dates/titles.
@@ -98,7 +99,7 @@ are recorded. A candidate is saved *before* reviewers run, so provider failures 
 
 ## Live model configuration
 
-Set `ANTHROPIC_API_KEY` securely in environment settings; never put its value in a command, Git,
+For Anthropic set `ANTHROPIC_API_KEY` securely in environment settings; never put its value in a command, Git,
 logs or chat. Then select live providers and models explicitly:
 
 ```bash
@@ -142,3 +143,23 @@ through the same renderer after explicit synthetic-test approval. Other tests co
 unsupported inventions, failed/incomplete reviews, role-specific SDK contracts without network,
 source-only citations, and unapproved candidate-prose exclusion. These are software checks, not
 claims of live recruiter judgment, document pagination quality or hiring outcomes.
+
+
+## OpenAI routing and credential migration
+
+OpenAI is supported for both generation and review. Select `--generator openai --reviewer openai`;
+provider-aware defaults choose `gpt-4.1`, or supply accessible model IDs explicitly. OpenAI uses
+Responses API strict function schemas; all reviewer receipts, quote/metric/ownership checks,
+revision bounds, usage tracking and final user-approval gates remain active. There is no fallback
+to mock or another live provider when authentication fails.
+
+Use `CAREER_OPENAI_API_KEY` for a new cloud binding, with `api.openai.com` as its allowed destination.
+The standard `OPENAI_API_KEY` is accepted locally but the cloud reserves that prefix. To reuse an
+existing saved binding, set `CAREER_OPENAI_KEY_VARIABLE` to its variable name and edit that binding's
+allowed destinations in environment settings. A tool cannot change a conflicting existing binding;
+adding a duplicate is not a workaround. Preserve the saved key and update its intended destination.
+No key value belongs in commands, code, logs, reports or chat.
+
+The UI honors GENERATOR_PROVIDER/REVIEWER_PROVIDER as initial selections and keeps model defaults
+separate by provider. A synthetic API check must succeed before personal data is sent. Unit tests
+exercise the real SDK through mocked HTTP and do not prove live access or account billing status.

@@ -84,7 +84,7 @@ def preview(packet, career):
 def packet_audit(packet, career, manifest):
     accepted = set()
     if manifest.get('settings', {}).get('factual_mode') == 'model_reviewed':
-        if manifest['settings'].get('reviewer') != 'anthropic':
+        if manifest['settings'].get('reviewer') not in ('anthropic', 'openai'):
             raise ValueError('Mock reviewers cannot authorize paraphrases')
         accepted, _ = accepted_assessments(packet, career, manifest['versions'][-1].get('support_assessments', []))
     return audit(packet, career, accepted)

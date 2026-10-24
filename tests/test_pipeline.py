@@ -144,6 +144,8 @@ def test_evaluation(tmp_path):
     assert report['human_editing_effort'] is None
 
 def test_ui_mock_workflow(monkeypatch, tmp_path):
+    monkeypatch.setenv('GENERATOR_PROVIDER','mock')
+    monkeypatch.setenv('REVIEWER_PROVIDER','mock')
     import career_pipeline.store as store_module
     monkeypatch.setattr(store_module, 'Store', lambda: Store(str(tmp_path/'ui.sqlite')))
     from streamlit.testing.v1 import AppTest

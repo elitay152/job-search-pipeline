@@ -36,7 +36,7 @@ python -m venv .venv
 
 The example selects Python/SQL ingestion and Airflow evidence, retains **estimated** savings, and surfaces Kubernetes and hybrid-location questions as gaps. No Kubernetes experience is invented. Drafts are labeled; final export is blocked until the deterministic audit passes and the user acknowledges review. Approval is bound to packet and evidence hashes. The CLI acknowledgement is an explicit user action, not an automated hiring or quality certification.
 
-The UI supports validated JSON evidence editing and local saving, a requirement map, previews, provenance, findings, revision diffs when present, run history, approval, and DOCX/Markdown/audit downloads. Resume and letter text can be edited in DOCX; edits made outside the app are outside its audit boundary. To use edited evidence, paste it into the editor or provide the local JSON to the CLI. UI preview uses the current evidence editor; exports reject an evidence-snapshot mismatch.
+The UI supports validated JSON evidence editing and local saving, a requirement map, previews, provenance, findings, revision diffs when present, run history, approval, and DOCX/Markdown/audit downloads. Resume and letter text can be edited in DOCX; edits made outside the app are outside its audit boundary. To use edited evidence, paste it into the editor or provide the local JSON to the CLI. Historical UI previews use the saved run snapshot; CLI exports reject an evidence-snapshot mismatch.
 
 ## Architecture and data flow
 
@@ -51,7 +51,7 @@ confirmed evidence + approved profile -> provider -> structured packet
 
 - `models.py`: employers, official titles/dates, projects, personal actions, ownership, technology usage, qualified metrics, sources, verification, approved wording and prohibited inferences. IDs must be stable and unique. Conflicting dates for the same employer/title are rejected. Unconfirmed evidence is ineligible.
 - `pipeline.py`: framework-independent orchestration. Requirement extraction is a transparent line/heading baseline, with required/preferred/ambiguous labels and verbatim excerpts. Location and practical constraints require clarification; no sensitive personal characteristics are inferred. Retrieval is a replaceable protocol, currently tag and lexical overlap. “Direct” means all non-stopword tokens match available evidence text/tags; “transferable” means partial overlap, **not** a semantic certification. Inspect the map for multi-tool or nuanced requirements.
-- `providers.py`: provider protocol, deterministic mock and Anthropic adapter. Generator/reviewer settings are separate. Approved style instructions are loaded explicitly. Job descriptions, evidence, and reviewer messages remain data in prompts; generated facts still face a deterministic gate. The model reviewer cannot replace the factual auditor. Recruiter objections must reference a known claim and requirement; voice objections require a known claim.
+- `providers.py`: provider protocol, deterministic mock, Anthropic and OpenAI Responses adapters. Generator/reviewer settings are separate. Approved style instructions are loaded explicitly. Job descriptions, evidence, and reviewer messages remain data in prompts; generated facts still face a deterministic gate. The model reviewer cannot replace the factual auditor. Recruiter objections must reference a known claim and requirement; voice objections require a known claim.
 - `store.py`: SQLite run manifests, input snapshots, version events, rejected revision candidates, and content-addressed stage cache. Cache keys include provider/model, prompt version, settings and full stage payload. Manifests include hashes, schema/prompt/profile versions, model settings, stage latency/status, available usage/cost, revisions, stopping reason, validation, artifact paths and checksums. SQLite contains private content; stdout does not print snapshots.
 - `export.py`: Markdown/DOCX renderer uses official employment metadata with separately user-approved descriptive display titles, excludes internal IDs from application files, and writes a separate audit report. PDF is an optional capability stub returning an explicit unavailable result; no rendering dependency is required.
 
@@ -76,7 +76,7 @@ export REVIEWER_MODEL=claude-sonnet-4-5
 
 `TOKEN_BUDGET` and `CALL_BUDGET` configure CLI limits. Python callers can set all `Settings` fields, including maximum output tokens and separate input/output USD-per-million rates. Prices are intentionally not hard-coded: live cost is unavailable unless rates are supplied. Mock usage/cost are zero. Live budgets reserve three attempts and byte-based input/schema bounds plus maximum output, then settle successful calls using reported usage; cached stages consume no new budget. Up to three attempts use short exponential backoff for connection, rate-limit and server errors; authentication and invalid JSON errors fail without unchanged retries. Reservations can stop a run earlier than actual token usage would suggest. Live outputs are not promised to regenerate identically.
 
-The Streamlit controls support separate generator/reviewer models, budgets, local evidence loading and an approved style directory; both providers currently use the same Anthropic API key. **Live Anthropic calls have not been exercised as part of credential-free validation.** A valid key, model access and HTTPS access to `api.anthropic.com` are required. No second provider is included.
+The Streamlit controls support separate generator/reviewer models, budgets, local evidence loading and an approved style directory; each selected provider uses its configured key binding. **Live Anthropic calls have not been exercised as part of credential-free validation.** A valid provider key, model access and HTTPS access to its API are required. OpenAI is also supported; see the configuration below.
 
 ## Writing profile calibration
 
@@ -106,7 +106,7 @@ The small benchmark compares A: full confirmed record one-shot, B: retrieval plu
 
 Local SQLite snapshots, cache, artifacts, personal evidence and samples contain private data. `.gitignore` excludes `local/`, `private/`, `artifacts/`, credentials and databases by default. Do not put personal files in public fixtures or writing_style/examples. Review files before staging. Delete the local database and artifacts to remove retained content; no automatic retention schedule or encryption at rest is implemented. Use a private machine and encrypted storage for sensitive data.
 
-Mock mode makes no model calls. Live mode transmits the job description, selected evidence (the full confirmed record for baseline A), approved profile, packet and findings to Anthropic. Raw writing samples are not sent. Provider retention and account policies apply. No private content is intentionally logged, but provider exception handling by external tooling should be reviewed before deployment. The UI is for a trusted single user: no authentication, multi-user isolation or internet deployment hardening is included. Structured inputs, factual gates and prompt boundaries reduce injection risk but are not a universal injection defense. Source verification and final editorial responsibility remain human tasks.
+Mock mode makes no model calls. Live mode transmits the job description, selected evidence (the full confirmed record for baseline A), approved profile, packet and findings to the selected provider (Anthropic or OpenAI). Raw writing samples are not sent. Provider retention and account policies apply. No private content is intentionally logged, but provider exception handling by external tooling should be reviewed before deployment. The UI is for a trusted single user: no authentication, multi-user isolation or internet deployment hardening is included. Structured inputs, factual gates and prompt boundaries reduce injection risk but are not a universal injection defense. Source verification and final editorial responsibility remain human tasks.
 
 
 ## Adapted resume development guidance
@@ -153,3 +153,38 @@ approval; model factual errors cannot be waived by the deterministic auditor or 
 Software tests include a deficient-packet regression that catches thin role coverage, missing
 publications/education and missing skills, revises, and revalidates through the actual pipeline.
 Live adversarial quality remains unverified without a configured key and actual service calls.
+
+
+## OpenAI provider
+
+Select OpenAI independently for generator and reviewer. Default OpenAI model: `gpt-4.1`; override
+it with `GENERATOR_MODEL` / `REVIEWER_MODEL` or the corresponding CLI/UI fields. Model availability
+and API billing depend on your account; a ChatGPT subscription alone is not API access.
+
+```bash
+# Put the API credential in secure environment settings, never here or in Git.
+export GENERATOR_PROVIDER=openai
+export REVIEWER_PROVIDER=openai
+.venv/bin/career run --jd private/job.txt --career private/career-v1.json \
+  --style private/writing_style/approved-v1 --report private/openai-review.md
+```
+
+The adapter uses the official OpenAI SDK Responses API with strict function-result schemas,
+separate reviewer-role prompts, bounded transient retries and actual reported token usage. All
+existing factual/semantic assessment and final approval gates apply to OpenAI too. Tests use
+mocked HTTP transport; they do not establish live authentication or response quality.
+
+For a new cloud configuration, use the non-reserved variable `CAREER_OPENAI_API_KEY`. Local
+installations also support the standard `OPENAI_API_KEY`; cloud settings reserve names beginning
+with `OPENAI_`. Existing bindings can be used explicitly with `CAREER_OPENAI_KEY_VARIABLE` set
+to that binding's variable **name**, not its value. The binding must allow `api.openai.com` and
+network policy must allow the same hostname. The app does not copy credentials or infer which
+provider a key belongs to.
+
+When a key was originally saved under a differently named binding, preserve it rather than adding
+a duplicate. Edit the existing binding's allowed destination in environment settings. For example,
+a binding named `ANTHROPIC_API_KEY` that actually contains an OpenAI key can be selected with
+`CAREER_OPENAI_KEY_VARIABLE=ANTHROPIC_API_KEY` and allowed at `api.openai.com`. This is explicit
+migration configuration; Anthropic still requires a genuine Anthropic key if selected later.
+Draft saves do not apply runtime changes; review/save and publish when required by the UI.
+Do not broaden the key's destinations to unrelated hosts or extract proxy-held values.

@@ -1,8 +1,9 @@
 import difflib
 import json
+import os
 from pathlib import Path
 import streamlit as st
-from career_pipeline.models import Career, Packet, Settings
+from career_pipeline.models import Career, Packet, Settings, DEFAULT_MODELS
 from career_pipeline.store import Store
 from career_pipeline.pipeline import run
 from career_pipeline.export import approve, export, preview
@@ -13,7 +14,7 @@ st.caption('Single-user workspace · verified facts · visible gaps · bounded r
 store = Store()
 tab1, tab2, tab3 = st.tabs(['Evidence & job', 'Packet & review', 'Run history'])
 with tab1:
-    st.info('The bundled candidate is synthetic. Put personal files in ignored private/ or local/. Live mode sends the job, selected career evidence, profile and drafts to Anthropic. Run history contains private snapshots locally.')
+    st.info('The bundled candidate is synthetic. Put personal files in ignored private/ or local/. Live mode sends the job, selected career evidence, profile and drafts to the selected live provider. Run history contains private snapshots locally.')
     evidence_path = st.text_input('Local evidence JSON path', 'fixtures/career.json')
     if st.button('Load local evidence'):
         try:
@@ -36,14 +37,17 @@ with tab1:
         st.success('Saved local/career.json')
     jd = st.text_area('Job description', Path('fixtures/job.txt').read_text(), height=180)
     c1, c2 = st.columns(2)
-    generator = c1.selectbox('Generator', ['mock', 'anthropic'])
-    reviewer = c2.selectbox('Reviewer', ['mock', 'anthropic'])
+    providers = ['mock', 'anthropic', 'openai']
+    generator_default = os.getenv('GENERATOR_PROVIDER', 'mock')
+    reviewer_default = os.getenv('REVIEWER_PROVIDER', 'mock')
+    generator = c1.selectbox('Generator', providers, index=providers.index(generator_default) if generator_default in providers else 0)
+    reviewer = c2.selectbox('Reviewer', providers, index=providers.index(reviewer_default) if reviewer_default in providers else 0)
     with st.expander('Model and budget settings'):
-        generator_model = st.text_input('Generator model', 'claude-sonnet-4-5')
-        reviewer_model = st.text_input('Reviewer model', 'claude-sonnet-4-5')
+        generator_model = st.text_input('Generator model', DEFAULT_MODELS[generator], key='generator_model_' + generator)
+        reviewer_model = st.text_input('Reviewer model', DEFAULT_MODELS[reviewer], key='reviewer_model_' + reviewer)
         token_budget = st.number_input('Token budget', min_value=1000, value=250000)
         call_budget = st.number_input('Call budget (includes retry reservations)', min_value=1, max_value=100, value=48)
-    factual_mode = st.selectbox('Factual validation mode', ['model_reviewed','strict'] if reviewer == 'anthropic' else ['strict'])
+    factual_mode = st.selectbox('Factual validation mode', ['model_reviewed','strict'] if reviewer != 'mock' else ['strict'])
     cycles = st.number_input('Maximum revision cycles', 0, 3, 2)
     if st.button('Create auditable draft', type='primary', disabled=career is None):
         try:

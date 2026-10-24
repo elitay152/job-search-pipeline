@@ -189,6 +189,8 @@ def test_private_intake_does_not_promote_proposed_or_uncertain_claims(tmp_path):
 
 
 def test_ui_historical_preview_uses_saved_snapshot(monkeypatch,tmp_path):
+    monkeypatch.setenv('GENERATOR_PROVIDER','mock')
+    monkeypatch.setenv('REVIEWER_PROVIDER','mock')
     from streamlit.testing.v1 import AppTest
     import career_pipeline.store as store_module
     store_path=str(tmp_path/'ui.sqlite')
@@ -229,8 +231,9 @@ def assessment(claim,quote,evidence_id='e0'):
        'scope_consistent':True,'dates_titles_consistent':True}
 
 
-def test_live_assessed_paraphrase_uses_quotes_and_independent_guards(career,store,monkeypatch):
-    from career_pipeline.providers import AnthropicProvider
+@pytest.mark.parametrize('provider',['anthropic','openai'])
+def test_live_assessed_paraphrase_uses_quotes_and_independent_guards(career,store,monkeypatch,provider):
+    from career_pipeline.providers import AnthropicProvider, OpenAIProvider
     text='Implemented Python ingestion.'
     seed=Packet(resume=[Claim(id='r1',text=text,evidence_ids=['e0'])],
                 cover_letter=[Claim(id='c1',text=text,evidence_ids=['e0'])])
@@ -240,8 +243,8 @@ def test_live_assessed_paraphrase_uses_quotes_and_independent_guards(career,stor
                 'assessments':[assessment(c,career.evidence[0].supported_wording[0]) for c in packet.resume+packet.cover_letter]
                     if payload['role']=='evidence' else []}
         return {'result':result,'input_tokens':100,'output_tokens':100}
-    monkeypatch.setattr(AnthropicProvider,'complete',fake_live)
-    m=run(JD,career,store,Settings(reviewer='anthropic',factual_mode='model_reviewed',max_revisions=0),seed_packet=seed)
+    monkeypatch.setattr(AnthropicProvider if provider=='anthropic' else OpenAIProvider,'complete',fake_live)
+    m=run(JD,career,store,Settings(reviewer=provider,factual_mode='model_reviewed',max_revisions=0),seed_packet=seed)
     assert not m['validation']
     assert len(m['versions'][0]['support_assessments'])==2
     assert m['status']=='draft'  # Presentation objections remain, but semantic support isn't faked as exact equality.

@@ -171,11 +171,13 @@ class Finding(BaseModel):
     code: str = 'review'
     message: str
 
+DEFAULT_MODELS = {'mock': 'claude-sonnet-4-5', 'anthropic': 'claude-sonnet-4-5', 'openai': 'gpt-4.1'}
+
 class Settings(BaseModel):
-    generator: Literal['mock', 'anthropic'] = 'mock'
-    reviewer: Literal['mock', 'anthropic'] = 'mock'
-    generator_model: str = 'claude-sonnet-4-5'
-    reviewer_model: str = 'claude-sonnet-4-5'
+    generator: Literal['mock', 'anthropic', 'openai'] = 'mock'
+    reviewer: Literal['mock', 'anthropic', 'openai'] = 'mock'
+    generator_model: str | None = None
+    reviewer_model: str | None = None
     factual_mode: Literal['strict', 'model_reviewed'] = 'strict'
     max_revisions: int = Field(default=2, ge=0, le=3)
     max_calls: int = Field(default=48, ge=1, le=100)
@@ -186,7 +188,9 @@ class Settings(BaseModel):
 
     @model_validator(mode='after')
     def support_mode(self):
-        if self.factual_mode == 'model_reviewed' and self.reviewer != 'anthropic':
+        self.generator_model = self.generator_model or DEFAULT_MODELS[self.generator]
+        self.reviewer_model = self.reviewer_model or DEFAULT_MODELS[self.reviewer]
+        if self.factual_mode == 'model_reviewed' and self.reviewer not in ('anthropic', 'openai'):
             raise ValueError('Reviewed paraphrases require a live reviewer, never mock approval')
         return self
 

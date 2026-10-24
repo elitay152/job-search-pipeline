@@ -16,12 +16,12 @@ def main():
     r.add_argument('--jd', required=True)
     r.add_argument('--career', required=True)
     r.add_argument('--style', default='writing_style')
-    r.add_argument('--generator', choices=['mock', 'anthropic'], default=os.getenv('GENERATOR_PROVIDER', 'mock'))
-    r.add_argument('--reviewer', choices=['mock', 'anthropic'], default=os.getenv('REVIEWER_PROVIDER', 'mock'))
+    r.add_argument('--generator', choices=['mock', 'anthropic', 'openai'], default=os.getenv('GENERATOR_PROVIDER', 'mock'))
+    r.add_argument('--reviewer', choices=['mock', 'anthropic', 'openai'], default=os.getenv('REVIEWER_PROVIDER', 'mock'))
     r.add_argument('--factual-mode', choices=['strict','model_reviewed'], default=None)
     r.add_argument('--seed-packet', help='Review and revise an existing structured packet, without bypassing gates')
-    r.add_argument('--generator-model', default=os.getenv('GENERATOR_MODEL', 'claude-sonnet-4-5'))
-    r.add_argument('--reviewer-model', default=os.getenv('REVIEWER_MODEL', 'claude-sonnet-4-5'))
+    r.add_argument('--generator-model', default=os.getenv('GENERATOR_MODEL'))
+    r.add_argument('--reviewer-model', default=os.getenv('REVIEWER_MODEL'))
     r.add_argument('--report', help='Write a private Markdown reviewer report')
     r.add_argument('--max-revisions', type=int, default=2)
     for name in ('approve', 'export'):
@@ -51,7 +51,7 @@ def main():
         if args.command == 'run':
             career = Career.model_validate_json(Path(args.career).read_text())
             settings = Settings(generator=args.generator, reviewer=args.reviewer, max_revisions=args.max_revisions,
-                factual_mode=args.factual_mode or ('model_reviewed' if args.reviewer == 'anthropic' else 'strict'),
+                factual_mode=args.factual_mode or ('model_reviewed' if args.reviewer != 'mock' else 'strict'),
                 generator_model=args.generator_model,
                 reviewer_model=args.reviewer_model,
                 token_budget=int(os.getenv('TOKEN_BUDGET', '250000')),
