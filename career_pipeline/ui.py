@@ -16,6 +16,7 @@ from career_pipeline.workbench import save_profile, analyze_job, add_gap_answer,
 from career_pipeline.job_input import load_job_url
 from career_pipeline.models import Requirement
 from career_pipeline.report import review_report
+from career_pipeline.ui_errors import configuration_problem, failure_message
 
 
 def lines(value):
@@ -268,6 +269,8 @@ with apply_tab:
         help='Practice mode exercises the pipeline without API credentials; it does not use live model reviewers.')
     provider = {'Practice with mock models': 'mock', 'Use OpenAI': 'openai', 'Use Anthropic': 'anthropic'}[mode]
     st.caption(f'{sum(e.eligible for e in career.evidence)} confirmed evidence records available. Unconfirmed records will not be used.')
+    if provider == 'mock':
+        st.info('Practice mode copies source statements. To create a polished application, choose a live provider above and configure its API key on this computer.')
     if provider != 'mock':
         st.info(f'This sends the job description, career evidence, approved style guidance and drafts to {provider.title()} for generation and review. API credentials belong in environment variables on this computer; cloud keys do not transfer here.')
     with st.expander('Writing style & advanced settings'):
@@ -281,7 +284,10 @@ with apply_tab:
         cycles = st.number_input('Maximum revision cycles', 0, 3, 2)
         token_budget = st.number_input('Token budget', min_value=1000, value=250000)
         call_budget = st.number_input('Call budget (includes retry reservations)', min_value=1, max_value=100, value=48)
-    if st.button('Create my draft', type='primary', disabled=not any(e.eligible for e in career.evidence) or len(jd.strip()) < 20):
+    problems = [message for p in set((generator, reviewer)) if (message := configuration_problem(p))]
+    for message in problems:
+        st.error(message)
+    if st.button('Create my draft', type='primary', disabled=bool(problems) or not any(e.eligible for e in career.evidence) or len(jd.strip()) < 20):
         try:
             with st.spinner('Matching evidence, writing and reviewing your application…'):
                 m = run(jd, career, store, Settings(generator=generator, reviewer=reviewer, factual_mode=factual_mode,
@@ -290,7 +296,7 @@ with apply_tab:
             st.session_state.run_id = m['id']
             st.success('Your draft is ready. Open Review & download to inspect it.')
         except Exception as exc:
-            st.error(f'Could not complete this run ({type(exc).__name__}). Check credentials and settings; saved progress is available in History.')
+            st.error(failure_message(exc))
 
 with review_tab:
     history = store.history()
@@ -307,7 +313,7 @@ with review_tab:
         st.subheader(m['status'].replace('_', ' ').title())
         st.caption(f"{m['revision_count']} revision cycles · {m.get('latency', 0):.1f} seconds · {m.get('stopping_reason', 'running').replace('_', ' ')}")
         if m['settings']['reviewer'] == 'mock':
-            st.warning('Practice run: deterministic checks, not a live adversarial model review.')
+            st.warning('Practice output copies evidence statements to test the workflow. It is not a professionally tailored resume. Choose Use OpenAI or Use Anthropic in Create application for composed documents and live reviews.')
         snapshot = None
         try:
             snapshot = store.career_snapshot(selected)
@@ -379,11 +385,12 @@ with review_tab:
             if st.button('Approve this application', disabled=not reviewed or blocked):
                 try:
                     approve(store, selected, snapshot, acknowledged=True)
-                    st.success('Approved. Final downloads are now available.')
-                    m = store.get(selected)
+                    st.session_state['downloads'] = [str(p) for p in export(store, selected, snapshot, draft=False)]
+                    st.rerun()
                 except ValueError as exc:
                     validation_message(exc)
-            draft = st.checkbox('Download as a labeled draft', value=not m['approved'], key='draft_' + selected)
+            draft = not m['approved']
+            st.caption('Downloads are final approved documents.' if m['approved'] else 'Downloads are labeled drafts until you approve this application.')
             if st.button('Prepare documents', disabled=not draft and not m['approved']):
                 try:
                     st.session_state['downloads'] = [str(p) for p in export(store, selected, snapshot, draft=draft)]
@@ -391,7 +398,7 @@ with review_tab:
                     validation_message(exc)
             for path in st.session_state.get('downloads', []):
                 p = Path(path)
-                if selected in str(p) and p.exists():
+                if selected in str(p) and p.exists() and p.parent.name == ('draft' if draft else 'final'):
                     st.download_button('Download ' + p.name, p.read_bytes(), file_name=p.name)
         else:
             st.info('This run did not save a document version. Check the technical details for completed stages.')

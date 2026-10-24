@@ -102,3 +102,20 @@ def test_corrupt_library_has_recovery_without_overwrite(workspace):
     assert not app.exception
     assert any('could not be read' in message.value for message in app.warning)
     assert target.read_text() == 'not valid data'
+
+
+def test_approval_replaces_prepared_draft_downloads_with_final_files(workspace):
+    from docx import Document
+    app=AppTest.from_file(str(ROOT/'career_pipeline/ui.py')).run()
+    field(app,'button','Load synthetic example').click().run()
+    field(app,'text_area','Paste the job description').set_value((workspace/'fixtures/job.txt').read_text()).run()
+    field(app,'button','Create my draft').click().run(timeout=20)
+    field(app,'button','Prepare documents').click().run()
+    assert all('/draft/' in p for p in app.session_state['downloads'])
+    field(app,'checkbox','I reviewed the wording, supporting evidence, dates and unresolved gaps.').check().run()
+    field(app,'button','Approve this application').click().run()
+    assert not app.exception
+    assert all('/final/' in p for p in app.session_state['downloads'])
+    resume=next(Path(p) for p in app.session_state['downloads'] if p.endswith('resume.docx'))
+    assert not any('DRAFT' in p.text for p in Document(resume).paragraphs)
+    assert any(s.value=='Approved' for s in app.subheader)
