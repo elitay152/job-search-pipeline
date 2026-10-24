@@ -153,3 +153,27 @@ def test_gateway_limits_retries_to_remaining_budget(monkeypatch,tmp_path):
         gateway.call('generate',{'style':'x'*50000})
     assert len(calls)==1
     assert gateway.tokens<=100000
+
+
+def test_review_schema_rejects_employment_and_passage_ids_as_evidence():
+    from jsonschema import validate
+    from jsonschema.exceptions import ValidationError as SchemaError
+    from career_pipeline.providers import constrain_review_schema
+    payload = {'role': 'recruiter', 'packet': {'resume': [{'id': 'passage-1'}]},
+               'career': {'evidence': [{'id': 'fact-1'}], 'employments': [{'id': 'job-1'}]},
+               'requirements': [{'id': 'q1'}]}
+    schema = constrain_review_schema(strict_tool_schema(ReviewResponse.model_json_schema()), payload)
+    finding = {'role': 'recruiter', 'claim_id': 'passage-1', 'requirement_id': 'q1',
+               'evidence_ids': ['fact-1'], 'severity': 'suggestion', 'section': None,
+               'code': 'clarity', 'message': 'Clarify the supported work.'}
+    result = {'findings': [finding], 'reviewed_claim_ids': ['passage-1'], 'assessments': []}
+    validate(result, schema)
+    for wrong_id in ('job-1', 'passage-1', 'invented-fact'):
+        finding['evidence_ids'] = [wrong_id]
+        with pytest.raises(SchemaError):
+            validate(result, schema)
+    finding['evidence_ids'] = []
+    validate(result, schema)
+    finding['claim_id'] = 'fact-1'
+    with pytest.raises(SchemaError):
+        validate(result, schema)

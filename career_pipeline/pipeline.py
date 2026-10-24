@@ -228,6 +228,8 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                                     request = dict(role_payload, contract_correction={
                                         'error': str(exc),
                                         'claim_ids': [c.id for c in packet.resume + packet.cover_letter],
+                                        'evidence_ids': [e.id for e in career.evidence],
+                                        'requirement_ids': [q.id for q in requirements],
                                         'instruction': 'Return a complete corrected review for your assigned role. This corrects the response contract, never relaxes factual standards.'})
                                 else:
                                     attempts.append({'status': 'accepted', 'response': raw})

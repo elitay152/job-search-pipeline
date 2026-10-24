@@ -315,6 +315,7 @@ with review_tab:
         selected = st.selectbox('Application', ids, format_func=run_label,
             index=ids.index(st.session_state.get('run_id')) if st.session_state.get('run_id') in ids else 0)
         m = store.get(selected)
+        st.download_button('Download full run audit (JSON)', json.dumps(m, indent=2), 'audit.json', 'application/json', key='audit_' + selected)
         st.subheader(m['status'].replace('_', ' ').title())
         if m.get('failure'):
             st.error('Stopped at ' + m['failure']['stage'] + ': ' + m['failure']['message'])
@@ -406,6 +407,8 @@ with review_tab:
             if st.button('Prepare documents', disabled=not draft and not m['approved']):
                 try:
                     st.session_state['downloads'] = [str(p) for p in export(store, selected, snapshot, draft=draft)]
+                    if store.get(selected).get('render_warnings'):
+                        st.warning('Invalid hidden characters were replaced with visible replacement marks in this draft. The audit preserves the original text. Correct or regenerate it before final approval.')
                 except ValueError as exc:
                     validation_message(exc)
             for path in st.session_state.get('downloads', []):
