@@ -10,6 +10,7 @@ from .store import Store, digest, now
 from .review import audit, reviews, document_plan, group_key
 from .grounding import accepted_assessments
 from .composition import build_composition_plan
+from .content_quality import check_content_quality
 
 TOKENS = re.compile(r'[a-z0-9+#]+')
 NAMED_TOOLS = ('sql server', 'azure devops', 'azure data factory', 'azure sql', 'blob storage',
@@ -195,7 +196,10 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
             manifest['versions'].append(version)
             manifest['revision_count'] = revision
             store.save(manifest)  # Save even if a reviewer fails before returning.
-            findings = stage('validate', lambda: reviews(packet, requirements, career, plan))
+            quality = (check_content_quality(packet, career, settings.content_quality, plan) if settings.generator != 'mock' else [])
+            version['content_quality_status'] = ('not_assessed_practice' if settings.generator == 'mock' else 'assessed' if settings.content_quality.enabled else 'disabled')
+            version['quality_findings'] = [f.model_dump() for f in quality]
+            findings = stage('validate', lambda: reviews(packet, requirements, career, plan)) + quality
             version['findings'] = [f.model_dump() for f in findings]
             grounded = set()
             if strategy == 'C':
@@ -231,7 +235,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                             version['support_assessments'] = raw.get('assessments', [])
                             grounded, rejected = accepted_assessments(packet, career, version['support_assessments'])
                             version['support_rejections'] = rejected
-                            findings = reviews(packet, requirements, career, plan, grounded)
+                            findings = reviews(packet, requirements, career, plan, grounded) + quality
                             for ident, reasons in rejected.items():
                                 findings.append(Finding(role='evidence', claim_id=ident, severity='error',
                                     code='grounding_rejected', message='; '.join(reasons)))

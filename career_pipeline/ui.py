@@ -14,7 +14,7 @@ from career_pipeline.pipeline import run
 from career_pipeline.export import approve, export, preview
 from career_pipeline.workbench import save_profile, analyze_job, add_gap_answer, fit_report
 from career_pipeline.job_input import load_job_url
-from career_pipeline.models import Requirement
+from career_pipeline.models import Requirement, ContentQualitySettings
 from career_pipeline.report import review_report
 from career_pipeline.ui_errors import configuration_problem, failure_message
 
@@ -281,6 +281,9 @@ with apply_tab:
         reviewer_model = st.text_input('Review model', DEFAULT_MODELS[reviewer], key='rm_' + reviewer)
         factual_mode = st.selectbox('Factual checking', ['model_reviewed', 'strict'] if reviewer != 'mock' else ['strict'],
             help='Live-reviewed paraphrases require source quotes and independent factual checks. Strict mode requires exact supported wording.')
+        quality_enabled = st.checkbox('Check writing quality', value=True)
+        minimum_bullet_words = st.number_input('Flag experience bullets shorter than this many words', 0, 30, 4)
+        minimum_letter_words = st.number_input('Preferred minimum cover-letter words (0 disables)', 0, 400, 0)
         cycles = st.number_input('Maximum revision cycles', 0, 3, 2)
         token_budget = st.number_input('Token budget', min_value=1000, value=250000)
         call_budget = st.number_input('Call budget (includes retry reservations)', min_value=1, max_value=100, value=48)
@@ -292,7 +295,8 @@ with apply_tab:
             with st.spinner('Matching evidence, writing and reviewing your application…'):
                 m = run(jd, career, store, Settings(generator=generator, reviewer=reviewer, factual_mode=factual_mode,
                     generator_model=generator_model, reviewer_model=reviewer_model, max_revisions=cycles,
-                    token_budget=token_budget, max_calls=call_budget), style_path=style_path)
+                    token_budget=token_budget, max_calls=call_budget, content_quality=ContentQualitySettings(enabled=quality_enabled,
+                        minimum_bullet_words=minimum_bullet_words, minimum_letter_words=minimum_letter_words)), style_path=style_path)
             st.session_state.run_id = m['id']
             st.success('Your draft is ready. Open Review & download to inspect it.')
         except Exception as exc:
@@ -337,6 +341,8 @@ with review_tab:
             with letter_tab:
                 st.markdown(letter)
             with notes_tab:
+                quality_status = m['versions'][-1].get('content_quality_status', 'not_recorded')
+                st.caption('Writing-quality checks: ' + quality_status.replace('_', ' ') + '. These are presentation heuristics, not factual certification.')
                 findings_view(m['versions'][-1]['findings'])
                 for version in m['versions']:
                     with st.expander(f"Version {version['number'] + 1} · review history"):

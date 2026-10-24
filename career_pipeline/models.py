@@ -173,7 +173,18 @@ class Finding(BaseModel):
 
 DEFAULT_MODELS = {'mock': 'claude-sonnet-4-5', 'anthropic': 'claude-sonnet-4-5', 'openai': 'gpt-4.1'}
 
+class ContentQualitySettings(BaseModel):
+    enabled: bool = True
+    minimum_bullet_words: int = Field(default=4, ge=0, le=30)
+    minimum_letter_words: int = Field(default=0, ge=0, le=400)
+    repetition_similarity: float = Field(default=0.9, ge=0.5, le=1.0)
+    check_number_display: bool = True
+    check_role_structure: bool = True
+    check_letter_structure: bool = True
+
+
 class Settings(BaseModel):
+    content_quality: ContentQualitySettings = Field(default_factory=ContentQualitySettings)
     generator: Literal['mock', 'anthropic', 'openai'] = 'mock'
     reviewer: Literal['mock', 'anthropic', 'openai'] = 'mock'
     generator_model: str | None = None

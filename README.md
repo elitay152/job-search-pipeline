@@ -231,3 +231,18 @@ a binding named `ANTHROPIC_API_KEY` that actually contains an OpenAI key can be 
 migration configuration; Anthropic still requires a genuine Anthropic key if selected later.
 Draft saves do not apply runtime changes; review/save and publish when required by the UI.
 Do not broaden the key's destinations to unrelated hosts or extract proxy-held values.
+
+### Writing-quality checks
+
+Live runs also apply presentation heuristics, separately from factual validation. They flag short
+experience fragments, source-record labels, repeated passages, scientific notation, role chronology,
+passages spanning employers, omitted selected skill categories and ledger-like cover letters.
+Selected education/publication omissions remain part of document review. These suggestions enter
+the existing bounded revision loop; unresolved presentation suggestions can be reviewed and approved,
+whereas factual errors still block final export. No check rewrites a fact automatically.
+
+Under Writing style & advanced settings, disable the checks or adjust minimum bullet/letter word
+preferences. Python callers can also configure repetition similarity and individual check groups
+through `Settings.content_quality`. The minimum letter-word preference defaults to disabled;
+length alone does not establish quality. Practice runs report quality as not assessed. Old run
+reports display not recorded, rather than retroactively claiming checks ran.

@@ -25,6 +25,10 @@ def review_report(manifest, career):
         lines += [f"- {value['requirement_id']}: {value['answer']}" for value in manifest['follow_up_answers'].values()]
     for version in manifest['versions']:
         lines += [f"## Version {version['number']}"]
+        quality_status = version.get('content_quality_status', 'not_recorded')
+        lines += ['Writing-quality heuristics: ' + {'assessed': 'assessed (presentation warnings, not factual certification)',
+            'disabled': 'disabled by configuration', 'not_assessed_practice': 'not assessed for practice output',
+            'not_recorded': 'not recorded for this older run'}.get(quality_status, quality_status)]
         for role, receipt in version.get('reviews', {}).items():
             lines += [f"{role}: {receipt['status']} ({receipt['provider']})"]
             for attempt in receipt.get('attempts', []):
