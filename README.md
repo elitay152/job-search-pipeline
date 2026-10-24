@@ -12,15 +12,58 @@ confirmation is separate from final user approval. Mock reviewers cannot authori
 
 Python 3.11+ (validated here on Python 3.12). From the checkout root:
 
-```bash
-python -m venv .venv
-.venv/bin/pip install -r requirements.lock
-.venv/bin/pip install --no-deps -e .
-.venv/bin/pytest -q
-.venv/bin/streamlit run career_pipeline/ui.py --server.headless true
+On Windows PowerShell, from the repository folder:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m streamlit run career_pipeline/ui.py
 ```
 
-`requirements.lock` pins the validated Python dependencies, including test tooling. No database server or credentials are required in mock mode. Run commands from the root so fixture and writing-profile paths resolve. SQLite and output directories are created automatically. Each cloud task already has an isolated checkout; a worktree is unnecessary.
+On macOS/Linux:
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/python -m pytest -q
+.venv/bin/python -m streamlit run career_pipeline/ui.py
+```
+
+Open the local browser address Streamlit prints. `requirements.lock` is the validated cloud
+Python 3.12 snapshot; its NumPy/pandas pins do not support Python 3.11. The commands above
+resolve dependencies compatible with your interpreter. Windows installation has not been run
+in the Linux cloud environment. No credentials are needed in practice mode.
+
+### Use the workbench
+
+Your experience is stored locally and reused on every run; it is not recreated for each job.
+On first use, import your private evidence backup in the sidebar, use the My experience forms,
+or load the clearly labeled synthetic example. Confirmed facts are saved to `local/career.json`;
+only confirmed records can generate claims. Role, evidence, tool, metric and source edits use
+forms. Saving an edited record requires factual confirmation again; otherwise it becomes uncertain.
+Back up the evidence file privately. Historical runs keep their original snapshots.
+
+In Create application, paste a job description or load one public HTTPS posting link. Review
+imported text before generating: some sites block access or require JavaScript/login. Paste text
+instead in those cases. The importer follows at most three redirects, limits page size, rejects
+local/private destinations, and does not crawl, log in or bypass site restrictions. Page content
+remains untrusted data. URL handling is tested with simulated responses; site access varies.
+
+The app maps requirements, asks optional gap questions, and saves explicitly confirmed factual
+answers to your reusable library. Training, portfolio and academic work retain their context.
+“No relevant experience” and practical preferences are saved separately, never promoted into
+experience. Unanswered gaps remain visible and do not prevent a truthful draft. Generation mode
+can be practice (no credentials), OpenAI, or Anthropic; model, review and writing-profile controls
+are optional advanced settings. A private approved style bundle at
+`private/writing_style/approved-v3` is selected when present; otherwise guidance is a neutral default.
+
+Review & download shows rendered resume/letter previews, readable objections, evidence behind
+passages, revision text diffs and a downloadable report. The report measures evidence coverage,
+not hiring probability or ATS success. Lexical matches and evidence links are not proof of semantic
+coverage. Factual errors prevent approval/final export; a labeled draft remains available. Final
+approval always requires your explicit review. History shows status, latency and available cost.
+JSON is reserved for optional backup/import and the expandable technical audit.
 
 ## Synthetic walkthrough
 

@@ -189,18 +189,20 @@ def test_private_intake_does_not_promote_proposed_or_uncertain_claims(tmp_path):
 
 
 def test_ui_historical_preview_uses_saved_snapshot(monkeypatch,tmp_path):
-    monkeypatch.setenv('GENERATOR_PROVIDER','mock')
-    monkeypatch.setenv('REVIEWER_PROVIDER','mock')
+    import shutil
     from streamlit.testing.v1 import AppTest
-    import career_pipeline.store as store_module
-    store_path=str(tmp_path/'ui.sqlite')
-    monkeypatch.setattr(store_module,'Store',lambda:Store(store_path))
-    app=AppTest.from_file(Path('career_pipeline/ui.py').resolve()).run(timeout=20)
-    next(b for b in app.button if b.label=='Create auditable draft').click().run(timeout=20)
+    root=Path(__file__).resolve().parents[1]
+    shutil.copytree(root/'fixtures',tmp_path/'fixtures')
+    shutil.copytree(root/'writing_style',tmp_path/'writing_style')
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('CAREER_DB',str(tmp_path/'ui.sqlite'))
+    app=AppTest.from_file(str(root/'career_pipeline/ui.py')).run(timeout=20)
+    next(b for b in app.button if b.label=='Load synthetic example').click().run(timeout=20)
+    next(t for t in app.text_area if t.label=='Paste the job description').set_value((tmp_path/'fixtures/job.txt').read_text()).run(timeout=20)
+    next(b for b in app.button if b.label=='Create my draft').click().run(timeout=20)
     assert not app.exception
-    edited=json.loads(next(t for t in app.text_area if t.label.startswith('Career evidence')).value)
-    edited['display_name']='Different Synthetic Editor Name'
-    next(t for t in app.text_area if t.label.startswith('Career evidence')).set_value(json.dumps(edited)).run(timeout=20)
+    next(t for t in app.text_input if t.label=='Name').set_value('Different Synthetic Editor Name')
+    next(b for b in app.button if b.label=='Save contact details').click().run(timeout=20)
     assert not app.exception
     previews='\n'.join(m.value for m in app.markdown)
     assert 'Morgan Example (Synthetic)' in previews

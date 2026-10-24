@@ -140,7 +140,8 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
         'settings': settings.model_dump(), 'strategy': strategy, 'stages': [], 'versions': [],
         'revision_count': 0, 'artifacts': [], 'approved': False,
         'review_mode': settings.reviewer, 'generation_mode': settings.generator,
-        'seed_packet_hash': digest(seed_packet.model_dump()) if seed_packet else None}
+        'seed_packet_hash': digest(seed_packet.model_dump()) if seed_packet else None,
+        'follow_up_answers': store.follow_up_answers(digest(jd))}
     store.save(manifest)
     gateway = Gateway(store, settings)
     def stage(name, function):
