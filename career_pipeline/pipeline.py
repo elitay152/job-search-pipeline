@@ -9,6 +9,7 @@ from .providers import Gateway, PROMPT_VERSION
 from .store import Store, digest, now
 from .review import audit, reviews, document_plan, group_key
 from .grounding import accepted_assessments
+from .composition import build_composition_plan
 
 TOKENS = re.compile(r'[a-z0-9+#]+')
 NAMED_TOOLS = ('sql server', 'azure devops', 'azure data factory', 'azure sql', 'blob storage',
@@ -175,6 +176,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
         evidence = [e.model_dump(mode='json') for e in eligible if e.id in selected]
         plan = document_plan(career, selected)
         plan['pending_sources'] = [{'id': e.id, 'kind': e.kind} for e in career.evidence if not e.eligible]
+        manifest['composition_plan'] = build_composition_plan(career, selected)
         manifest['document_plan'] = plan
         manifest['requirements'] = [q.model_dump() for q in requirements]
         manifest['discovery_questions'] = discovery_questions(requirements)
@@ -182,7 +184,8 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
         manifest['excluded_evidence'] = [{'id': e.id, 'reason': 'uncertain_source' if not e.eligible else 'not_selected'}
                                          for e in career.evidence if e.id not in selected or not e.eligible]
         payload = {'job_description': jd, 'requirements': manifest['requirements'], 'evidence': evidence,
-                   'style': style['instructions'], 'document_plan': plan, 'factual_mode': settings.factual_mode}
+                   'style': style['instructions'], 'document_plan': plan, 'composition_plan': manifest['composition_plan'],
+                   'factual_mode': settings.factual_mode}
         packet = seed_packet or stage('generate', lambda: Packet.model_validate(gateway.call('generate', payload)))
         seen = set()
         for revision in range(settings.max_revisions + 1):
