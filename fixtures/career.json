@@ -1,0 +1,92 @@
+{
+  "display_name": "Morgan Example (Synthetic)",
+  "evidence": [
+    {
+      "id": "ev-pipeline",
+      "employer": "Synthetic Analytics Co",
+      "official_title": "Data Engineer",
+      "start": "2022-01-01",
+      "end": "2024-06-30",
+      "project": "Warehouse ingestion",
+      "actions": [
+        "Implemented batch ingestion and data quality checks"
+      ],
+      "ownership": "contributed",
+      "technologies": [
+        {
+          "name": "Python",
+          "usage": "Batch ingestion"
+        },
+        {
+          "name": "SQL",
+          "usage": "Warehouse transformations"
+        }
+      ],
+      "outcomes": [
+        "Reduced manual validation effort"
+      ],
+      "metrics": [
+        {
+          "value": 20,
+          "unit": "hours per month",
+          "qualifier": "estimated"
+        }
+      ],
+      "sources": [
+        {
+          "reference": "synthetic://confirmed-notes/1",
+          "status": "user_confirmed"
+        }
+      ],
+      "approved_wording": [
+        "Contributed Python and SQL batch ingestion with data quality checks, with estimated savings of 20 hours per month."
+      ],
+      "prohibited_inferences": [
+        "Realized savings",
+        "Team leadership",
+        "Database administration"
+      ],
+      "tags": [
+        "Python",
+        "SQL",
+        "ingestion",
+        "data quality"
+      ]
+    },
+    {
+      "id": "ev-orchestration",
+      "employer": "Synthetic Analytics Co",
+      "official_title": "Data Engineer",
+      "start": "2022-01-01",
+      "end": "2024-06-30",
+      "project": "Scheduled jobs",
+      "actions": [
+        "Configured Airflow task retries and logging"
+      ],
+      "ownership": "owned",
+      "technologies": [
+        {
+          "name": "Airflow",
+          "usage": "Task scheduling, retries and logging"
+        }
+      ],
+      "outcomes": [
+        "Observable scheduled jobs"
+      ],
+      "sources": [
+        {
+          "reference": "synthetic://confirmed-notes/2",
+          "status": "user_confirmed"
+        }
+      ],
+      "approved_wording": [
+        "Configured Airflow scheduling, task retries and operational logging for batch jobs."
+      ],
+      "tags": [
+        "Airflow",
+        "orchestration",
+        "observability"
+      ]
+    }
+  ]
+}

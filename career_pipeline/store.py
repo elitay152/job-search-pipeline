@@ -1,0 +1,39 @@
+import hashlib
+import json
+import sqlite3
+from pathlib import Path
+from datetime import datetime, timezone
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+def digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
+
+class Store:
+    def __init__(self, path='local/pipeline.sqlite'):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(path)
+        self.db.executescript('''
+        CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, manifest TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS events(run_id TEXT, stage TEXT, payload TEXT, created TEXT);
+        CREATE TABLE IF NOT EXISTS cache(key TEXT PRIMARY KEY, payload TEXT);
+        ''')
+        self.db.commit()
+
+    def save(self, manifest):
+        self.db.execute('INSERT OR REPLACE INTO runs VALUES (?,?)', (manifest['id'], json.dumps(manifest)))
+        self.db.commit()
+
+    def event(self, run_id, stage, payload):
+        self.db.execute('INSERT INTO events VALUES (?,?,?,?)', (run_id, stage, json.dumps(payload), now()))
+        self.db.commit()
+
+    def get(self, run_id):
+        row = self.db.execute('SELECT manifest FROM runs WHERE id=?', (run_id,)).fetchone()
+        if not row:
+            raise ValueError('unknown run')
+        return json.loads(row[0])
+
+    def history(self):
+        return [json.loads(r[0]) for r in self.db.execute('SELECT manifest FROM runs ORDER BY rowid DESC')]

@@ -1,0 +1,12 @@
+{
+  "version": "neutral-v1",
+  "approved": true,
+  "basis": "neutral default; no user writing samples supplied",
+  "sentence_length": "Prefer 12–25 words; allow longer sentences for necessary technical precision.",
+  "directness": "Lead with action and concrete object; avoid throat clearing.",
+  "paragraphs": "One idea per paragraph, two to four sentences in a letter.",
+  "technical_detail": "Name the tool, its actual use and supported outcome.",
+  "confidence": "Preserve uncertainty, estimates and scope; avoid inflated adjectives.",
+  "avoid": ["rockstar", "ninja", "world-class", "synergy", "passionate about leveraging"],
+  "samples": []
+}
