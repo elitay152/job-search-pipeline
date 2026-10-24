@@ -143,18 +143,21 @@ def test_evaluation(tmp_path):
     assert all(r['metrics']['unsupported_claims'] == 0 for r in report['results'])
     assert report['human_editing_effort'] is None
 
-def test_ui_mock_workflow(monkeypatch, tmp_path):
-    monkeypatch.setenv('GENERATOR_PROVIDER','mock')
-    monkeypatch.setenv('REVIEWER_PROVIDER','mock')
-    import career_pipeline.store as store_module
-    monkeypatch.setattr(store_module, 'Store', lambda: Store(str(tmp_path/'ui.sqlite')))
+def test_ui_mock_workflow(monkeypatch,tmp_path):
+    import shutil
     from streamlit.testing.v1 import AppTest
-    app = AppTest.from_file(Path('career_pipeline/ui.py').resolve()).run(timeout=20)
-    assert not app.exception
-    create = next(b for b in app.button if b.label == 'Create auditable draft')
-    create.click().run(timeout=20)
+    root=Path(__file__).resolve().parents[1]
+    shutil.copytree(root/'fixtures',tmp_path/'fixtures')
+    shutil.copytree(root/'writing_style',tmp_path/'writing_style')
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('CAREER_DB',str(tmp_path/'ui.sqlite'))
+    app=AppTest.from_file(str(root/'career_pipeline/ui.py')).run(timeout=20)
+    next(b for b in app.button if b.label=='Load synthetic example').click().run(timeout=20)
+    next(t for t in app.text_area if t.label=='Paste the job description').set_value((tmp_path/'fixtures/job.txt').read_text()).run(timeout=20)
+    next(b for b in app.button if b.label=='Create my draft').click().run(timeout=20)
     assert not app.exception
     assert app.session_state['run_id']
+
 
 def test_cache_reuses_identical_stage(career, store):
     jd = Path('fixtures/job.txt').read_text()

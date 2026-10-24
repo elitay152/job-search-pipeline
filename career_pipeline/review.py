@@ -48,10 +48,10 @@ def audit(packet, career, grounded_claims=None):
             findings.append(Finding(role='evidence', evidence_ids=[ident], section='skills',
                 severity='error', code='unsupported_skill', message='Skill source is missing, uncertain or has no supported technology.'))
     if not packet.resume or not packet.cover_letter:
-        findings.append(Finding(role='evidence', severity='error', code='empty_packet', message='Resume and letter require factual content.'))
+        findings.append(Finding(role='evidence', severity='error', section='packet', code='empty_packet', message='Resume and letter require factual content.'))
     ids = [c.id for c in packet.resume + packet.cover_letter]
     if len(ids) != len(set(ids)):
-        findings.append(Finding(role='evidence', severity='error', code='duplicate_claim_id', message='Claim IDs must be unique.'))
+        findings.append(Finding(role='evidence', severity='error', section='packet', code='duplicate_claim_id', message='Claim IDs must be unique.'))
     return findings
 
 

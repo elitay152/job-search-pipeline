@@ -44,3 +44,7 @@ class Store:
         if not row:
             raise ValueError('Run input snapshot unavailable')
         return Career.model_validate(json.loads(row[0])['career'])
+
+    def follow_up_answers(self, input_hash):
+        rows = self.db.execute("SELECT payload FROM events WHERE run_id=? AND stage='follow_up' ORDER BY rowid", ('intake-' + input_hash,))
+        return {value['requirement_id']: value for value in (json.loads(row[0]) for row in rows)}
