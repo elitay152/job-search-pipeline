@@ -15,6 +15,8 @@ def configuration_problem(provider):
 
 
 def failure_message(exc):
+    if isinstance(exc, ValueError) and str(exc) == 'provider call/token budget exhausted before request':
+        return 'The run reached its call/token budget before the next request. Increase the budget under Writing style & advanced settings, or use fewer revision cycles. No request was sent for the blocked stage.'
     status = getattr(exc, 'status_code', None)
     if status == 401:
         return 'The provider rejected the API key. Check the key configured on this computer and restart Streamlit after changing it.'
