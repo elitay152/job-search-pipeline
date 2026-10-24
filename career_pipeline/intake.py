@@ -137,12 +137,19 @@ def import_intake(directory, output):
             source = Source(reference=f'{root}/user-confirmations.json#{confirmation["id"]}', status='user_confirmed', excerpt=confirmation.get('user_statement'))
             metric = facts.get('metric', {})
             metrics = [Metric.model_validate(metric)] if metric.get('qualifier') in ('realized', 'estimated', 'expected') else []
+            # A confirmation can cover multiple degrees. Each evidence record must describe
+            # only its matching degree, rather than inheriting the first target's label
+            # and every degree's metadata (which could falsely support cross-degree claims).
+            degree = next((d for d in facts.get('degrees', [])
+                           if text in statements_from_facts({'degrees': [d]})), None)
+            record_facts = dict(facts, degrees=[degree]) if degree else facts
+            project = degree['degree'] if degree else targets[0]['topic'] if targets else confirmation['id']
             evidence.append(Evidence(id=ident, kind=kind, employer=employer,
                 employment_ids=sorted(by_employer.get(employer, [])) if kind == 'experience' else [],
-                project=targets[0]['topic'] if targets else confirmation['id'],
+                project=project,
                 actions=facts.get('personally_performed', [text]), ownership='contributed',
                 technologies=technologies(text, kind), metrics=metrics, sources=[source],
-                confirmed_statements=[text], fact_details=facts, prohibited_inferences=confirmation.get('prohibited_inferences', []),
+                confirmed_statements=[text], fact_details=record_facts, prohibited_inferences=confirmation.get('prohibited_inferences', []),
                 tags=[t.name for t in technologies(text, kind)]))
             imported.append({'id': ident, 'confirmation_id': confirmation['id'], 'kind': kind,
                              'wording_basis': 'deterministically normalized confirmed_facts fields; unapproved candidate_wording is ignored'})
@@ -167,7 +174,7 @@ def import_intake(directory, output):
     if dest.exists():
         raise ValueError('Refusing to overwrite an existing evidence snapshot; choose a new version')
     dest.write_text(result.model_dump_json(indent=2))
-    dest.with_suffix('.import-report.json').write_text(json.dumps({'converter_version': 'facts-only-v1', 'source_hash': digest(ledger),
+    dest.with_suffix('.import-report.json').write_text(json.dumps({'converter_version': 'facts-only-v2', 'source_hash': digest(ledger),
         'career_hash': digest(result.model_dump(mode='json')), 'imported': imported, 'pending': pending,
         'metadata_note': 'Only confirmed month ranges are imported. Display titles require explicit approval; original titles and source metadata remain available for user packet review.'}, indent=2))
     return result
