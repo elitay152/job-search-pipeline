@@ -83,8 +83,8 @@ def statements_from_facts(facts):
 
 def import_intake(directory, output):
     root = Path(directory)
-    draft = json.loads((root/'career.evidence-draft.json').read_text())
-    ledger = json.loads((root/'user-confirmations.json').read_text())
+    draft = json.loads((root/'career.evidence-draft.json').read_text(encoding='utf-8'))
+    ledger = json.loads((root/'user-confirmations.json').read_text(encoding='utf-8'))
     records = {r['id']: r for r in draft['records']}
     roles = {}
     by_employer = {}
@@ -173,8 +173,8 @@ def import_intake(directory, output):
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
         raise ValueError('Refusing to overwrite an existing evidence snapshot; choose a new version')
-    dest.write_text(result.model_dump_json(indent=2))
+    dest.write_text(result.model_dump_json(indent=2), encoding='utf-8')
     dest.with_suffix('.import-report.json').write_text(json.dumps({'converter_version': 'facts-only-v2', 'source_hash': digest(ledger),
         'career_hash': digest(result.model_dump(mode='json')), 'imported': imported, 'pending': pending,
-        'metadata_note': 'Only confirmed month ranges are imported. Display titles require explicit approval; original titles and source metadata remain available for user packet review.'}, indent=2))
+        'metadata_note': 'Only confirmed month ranges are imported. Display titles require explicit approval; original titles and source metadata remain available for user packet review.'}, indent=2), encoding='utf-8')
     return result

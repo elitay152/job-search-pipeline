@@ -60,3 +60,20 @@ def fit_report(requirements, packet=None):
         'required_supported': sum(q.priority == 'required' for q in supported),
         'required_total': sum(q.kind == 'skill' and q.priority == 'required' for q in requirements),
         'practical_constraints': sum(q.kind == 'constraint' for q in requirements)}
+
+
+def requirement_details(requirements, packet=None, answers=None):
+    """Keep deterministic evidence links separate from model and human judgments."""
+    passages = packet.resume + packet.cover_letter if packet else []
+    answers = answers or {}
+    return [dict(q.model_dump(),
+        passage_ids=[c.id for c in passages if set(c.evidence_ids).intersection(q.evidence_ids)],
+        explanation=('Practical constraint; confirm separately from career evidence.' if q.kind == 'constraint'
+            else 'No supporting evidence selected; clarify or retain as a gap.' if not q.evidence_ids
+            else 'Lexical/tag matching selected these sources; inspect wording and context before accepting coverage.'),
+        follow_up=answers.get(q.id)) for q in requirements]
+
+
+def application_label(manifest):
+    info = manifest.get('application', {})
+    return ' — '.join(info[k] for k in ('company', 'role') if info.get(k)) or 'Untitled application'

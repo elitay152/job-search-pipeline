@@ -393,3 +393,23 @@ def test_failed_run_persists_safe_stage_diagnostic(monkeypatch,career,store):
     assert failure['stage']=='generate'
     assert failure['code']=='response_incomplete'
     assert 'per-call output limit' in failure['message']
+
+
+def test_presentation_revision_cannot_replace_passing_packet_with_unsupported_claim(monkeypatch, career, store):
+    original = MockProvider.complete
+    def provider(self, task, payload, model):
+        result = original(self, task, payload, model)
+        if task == 'review' and payload['role'] == 'voice':
+            result['findings'].append({'role': 'voice', 'claim_id': payload['packet']['resume'][0]['id'],
+                'severity': 'suggestion', 'code': 'style', 'message': 'Improve clarity without adding facts.'})
+        if task == 'revise':
+            result['resume'][0]['text'] = 'Managed 500 engineers and saved $900 million.'
+        return result
+    monkeypatch.setattr(MockProvider, 'complete', provider)
+    m = run(JD, career, store)
+    assert m['stopping_reason'] == 'factual_regression_rollback'
+    assert m['revision_count'] == 1 and len(m['versions']) == 3
+    assert m['versions'][-1]['restored_from_version'] == 0
+    assert m['versions'][-1]['packet'] == m['versions'][0]['packet']
+    assert any(f['severity'] == 'error' for f in m['versions'][1]['findings'])
+    assert not m['validation'] and not m['approved']

@@ -29,3 +29,13 @@ def test_draft_export_handles_controls_and_audit_preserves_original(tmp_path):
 def test_normal_unicode_tabs_and_line_breaks_are_preserved():
     text='Résumé — SQL\tPython\nData\rEngineering 😀'
     assert XML_INVALID.sub('\ufffd',text)==text
+
+
+def test_invalid_generated_character_is_sent_to_revision_even_if_grounded():
+    from career_pipeline.models import Packet
+    from career_pipeline.review import audit
+    career=Career.model_validate_json(Path('fixtures/career.json').read_text())
+    packet=Packet(resume=[{'id':'r1','text':'Built\x19 pipelines.','evidence_ids':['ev-pipeline']}],
+                  cover_letter=[{'id':'c1','text':'Built pipelines.','evidence_ids':['ev-pipeline']}])
+    findings=audit(packet,career,grounded_claims={'r1','c1'})
+    assert any(f.code=='invalid_document_character' and f.claim_id=='r1' for f in findings)

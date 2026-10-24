@@ -1,5 +1,4 @@
 import json
-import re
 from pathlib import Path
 from docx import Document
 from docx.shared import Inches, Pt
@@ -8,7 +7,7 @@ from .pipeline import audit
 from .store import digest, now
 from .grounding import accepted_assessments
 
-XML_INVALID = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]')
+from .text_safety import XML_INVALID
 
 
 def require_clean_final_text(packet, career):
@@ -180,11 +179,16 @@ def export(store, run_id, career, directory='artifacts', draft=False):
     m['render_warnings'] = render_warnings
     for path in paths:
         m['artifacts'].append({'path': str(path), 'sha256': __import__('hashlib').sha256(path.read_bytes()).hexdigest(),
-                               'draft': draft, 'created': now()})
+                               'draft': draft, 'packet_hash': digest(packet.model_dump()), 'created': now()})
     store.save(m)
     report = out/'audit.json'
-    report.write_text(json.dumps(m, indent=2))
+    report.write_text(json.dumps(m, indent=2), encoding='utf-8')
     return paths + [report]
 
-def export_pdf(*args, **kwargs):
-    return {'available': False, 'reason': 'PDF renderer not installed; use editable DOCX or Markdown.'}
+def export_pdf(store=None, run_id=None, paths=None, **kwargs):
+    if store is None:
+        import shutil
+        return {'available': bool(shutil.which('libreoffice') or shutil.which('soffice')),
+                'reason': 'Local LibreOffice is required for PDF rendering.'}
+    from .layout import render_layout
+    return render_layout(store, run_id, paths, **kwargs)

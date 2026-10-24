@@ -246,3 +246,53 @@ preferences. Python callers can also configure repetition similarity and individ
 through `Settings.content_quality`. The minimum letter-word preference defaults to disabled;
 length alone does not establish quality. Practice runs report quality as not assessed. Old run
 reports display not recorded, rather than retroactively claiming checks ran.
+
+### Readiness and release checks
+
+The sidebar shows the running commit (or installed package version). In **Provider readiness**,
+key presence means only that a value is configured. **Test selected providers with synthetic data**
+makes one small structured request for the generator and one for the reviewer, using fictional
+facts only. These requests can incur API charges and are separate from the application budget.
+A successful test verifies that configuration, not the quality or completion of a larger run.
+The panel explains call counts and conservative token reservations before generation.
+
+Enter optional company and role names to identify saved applications. Match reports retain job
+excerpts, evidence IDs and linked passages, and distinguish lexical coverage from model findings.
+Practical constraints remain separate from career evidence. No summary predicts hiring outcomes.
+
+The full audit is downloadable even if document export fails. Invalid hidden characters are
+flagged during review; labeled drafts show visible replacement marks and retain originals in the
+audit. Final approval blocks invalid text. Review the audit locally: it includes private content.
+
+### Optional PDF and layout inspection
+
+Editable DOCX and Markdown do not require a PDF renderer. To enable local PDF conversion,
+install LibreOffice and ensure `soffice` or `libreoffice` is on PATH. For page geometry checks:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[layout]"
+```
+
+On Linux/macOS use `.venv/bin/python -m pip install -e '.[layout]'`.
+In **Review & download → Optional PDF & layout review**, render the current documents. Page-count
+preferences, dense-text, possible clipping and possible orphaned-heading warnings are heuristics,
+not a visual-quality guarantee. Download and open the PDFs before recording visual review.
+That acknowledgement is bound to PDF hashes and document version; it never bypasses factual
+approval. Missing dependencies or conversion failures leave DOCX/Markdown available.
+
+CLI equivalents:
+
+```text
+career check-provider --provider openai --model gpt-4.1 --role generator
+career check-provider --provider openai --model gpt-4.1 --role reviewer
+career layout RUN_ID --draft
+```
+
+Run `python -m pip install -e ".[dev,layout]"` and `python -m pytest -q` to test.
+CI is configured for Windows and Ubuntu on Python 3.11 and 3.12. A workflow configuration is not
+proof those jobs passed; inspect GitHub Actions before release. See
+[release verification](docs/release-verification.md) for measured checks and remaining verification.
+
+If presentation edits introduce new review errors after a packet has passed, the pipeline restores
+that exact passing packet and stops. Both the rejected edit and restored version remain in the
+audit. Restoring a version does not mark it user-approved or remove unresolved presentation gaps.

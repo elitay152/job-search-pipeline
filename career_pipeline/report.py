@@ -1,11 +1,11 @@
 """Readable run inspection: generated versions and reviewer objections, not hidden manual drafts."""
 import difflib
 from .models import Packet, Requirement
-from .workbench import fit_report
+from .workbench import fit_report, requirement_details, application_label
 from .export import preview
 
 def review_report(manifest, career):
-    lines = [f"# Pipeline run {manifest['id']}", f"Status: {manifest['status']}",
+    lines = [f"# Pipeline run {manifest['id']}", f"Status: {manifest['status']}", application_label(manifest),
         f"Generator: {manifest['settings']['generator']} / Reviewer: {manifest['settings']['reviewer']}",
         f"Stopping reason: {manifest.get('stopping_reason', 'running')}"]
     if manifest.get('failure'):
@@ -20,13 +20,19 @@ def review_report(manifest, career):
         f"Required items with evidence: {summary['required_supported']} / {summary['required_total']}.",
         f"Direct: {summary['direct']}; transferable: {summary['transferable']}; gaps: {summary['gaps']}; clarification needed: {summary['clarifications']}.",
         'Lexical matching and cited evidence are not proof of semantic coverage. This is not an ATS score or a hiring prediction.']
-    for requirement in requirements:
-        lines += [f"- {requirement.priority.title()} / {requirement.classification.replace('_', ' ')}: {requirement.excerpt}"]
+    for row in requirement_details(requirements, packet, manifest.get('follow_up_answers')):
+        lines += [f"### {row['id']} · {row['priority']} · {row['kind']} · {row['classification']}",
+            'JD excerpt: ' + row['excerpt'], row['explanation'],
+            'Evidence: ' + (', '.join(row['evidence_ids']) or 'none'),
+            'Linked passages (not semantic proof): ' + (', '.join(row['passage_ids']) or 'none')]
+    lines += ['## Judgment sources', 'Coverage above is deterministic lexical/tag matching. Reviewer findings below are model judgments in live mode and deterministic checks in practice mode. Human preference and editing effort: not collected by this report.']
     if manifest.get('follow_up_answers'):
         lines += ['## Your follow-up answers']
         lines += [f"- {value['requirement_id']}: {value['answer']}" for value in manifest['follow_up_answers'].values()]
     for version in manifest['versions']:
         lines += [f"## Version {version['number']}"]
+        if 'restored_from_version' in version:
+            lines += [f"Restored from version {version['restored_from_version']}; later rejected edits remain in this audit."]
         quality_status = version.get('content_quality_status', 'not_recorded')
         lines += ['Writing-quality heuristics: ' + {'assessed': 'assessed (presentation warnings, not factual certification)',
             'disabled': 'disabled by configuration', 'not_assessed_practice': 'not assessed for practice output',

@@ -15,6 +15,8 @@ def main():
     r = sub.add_parser('run')
     r.add_argument('--jd', required=True)
     r.add_argument('--career', required=True)
+    r.add_argument('--company', default='')
+    r.add_argument('--role', default='')
     r.add_argument('--style', default='writing_style')
     r.add_argument('--generator', choices=['mock', 'anthropic', 'openai'], default=os.getenv('GENERATOR_PROVIDER', 'mock'))
     r.add_argument('--reviewer', choices=['mock', 'anthropic', 'openai'], default=os.getenv('REVIEWER_PROVIDER', 'mock'))
@@ -34,6 +36,14 @@ def main():
             cmd.add_argument('--draft', action='store_true')
             cmd.add_argument('--output', default='artifacts')
     sub.add_parser('history')
+    ready = sub.add_parser('check-provider')
+    ready.add_argument('--provider', choices=['mock', 'openai', 'anthropic'], required=True)
+    ready.add_argument('--model', required=True)
+    ready.add_argument('--role', choices=['generator', 'reviewer'], default='generator')
+    layout = sub.add_parser('layout')
+    layout.add_argument('run_id')
+    layout.add_argument('--draft', action='store_true')
+    layout.add_argument('--output', default='artifacts')
     inspect = sub.add_parser('inspect')
     inspect.add_argument('run_id')
     inspect.add_argument('--output', required=True)
@@ -48,23 +58,33 @@ def main():
     args = p.parse_args()
     store = Store(args.db)
     try:
-        if args.command == 'run':
-            career = Career.model_validate_json(Path(args.career).read_text())
+        if args.command == 'check-provider':
+            from .readiness import check_provider
+            result = check_provider(args.provider, args.model, args.role)
+            print(json.dumps(result))
+            if result['status'] != 'passed':
+                p.exit(1)
+        elif args.command == 'layout':
+            from .export import export_pdf
+            paths = export(store, args.run_id, store.career_snapshot(args.run_id), args.output, args.draft)
+            print(json.dumps(export_pdf(store, args.run_id, paths)))
+        elif args.command == 'run':
+            career = Career.model_validate_json(Path(args.career).read_text(encoding='utf-8'))
             settings = Settings(generator=args.generator, reviewer=args.reviewer, max_revisions=args.max_revisions,
                 factual_mode=args.factual_mode or ('model_reviewed' if args.reviewer != 'mock' else 'strict'),
                 generator_model=args.generator_model,
                 reviewer_model=args.reviewer_model,
                 token_budget=int(os.getenv('TOKEN_BUDGET', '250000')),
                 max_calls=int(os.getenv('CALL_BUDGET', '48')))
-            seed = Packet.model_validate_json(Path(args.seed_packet).read_text()) if args.seed_packet else None
-            m = run(Path(args.jd).read_text(), career, store, settings, args.style, seed_packet=seed)
+            seed = Packet.model_validate_json(Path(args.seed_packet).read_text(encoding='utf-8')) if args.seed_packet else None
+            m = run(Path(args.jd).read_text(encoding='utf-8'), career, store, settings, args.style, seed_packet=seed, application={'company': args.company, 'role': args.role})
             if args.report:
                 from .report import review_report
                 Path(args.report).parent.mkdir(parents=True, exist_ok=True)
-                Path(args.report).write_text(review_report(m, career))
+                Path(args.report).write_text(review_report(m, career), encoding='utf-8')
             print(json.dumps({k: m[k] for k in ('id','status','revision_count','stopping_reason','latency')}))
         elif args.command in ('approve', 'export'):
-            career = Career.model_validate_json(Path(args.career).read_text())
+            career = Career.model_validate_json(Path(args.career).read_text(encoding='utf-8'))
             if args.command == 'approve':
                 print(approve(store, args.run_id, career, args.reviewed)['status'])
             else:
@@ -76,7 +96,7 @@ def main():
         elif args.command == 'inspect':
             from .report import review_report
             Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-            Path(args.output).write_text(review_report(store.get(args.run_id), store.career_snapshot(args.run_id)))
+            Path(args.output).write_text(review_report(store.get(args.run_id), store.career_snapshot(args.run_id)), encoding='utf-8')
             print('Private review report saved')
         elif args.command == 'history':
             print(json.dumps([{k: m[k] for k in ('id','created','status','latency','estimated_cost')} for m in store.history()], indent=2))

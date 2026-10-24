@@ -4,13 +4,16 @@ GitHub issue creation was attempted on 2026-10-24 and rejected with HTTP Forbidd
 These are prepared issue bodies, not numbered GitHub issues. Source review:
 [Reference repository review](../reference-repository-review.md).
 
-Work order:
-0. Diagnose remaining local OpenAI failure (in progress; need local version/error).
-1. [Plan document composition before generation](01-composition-plan.md) — in progress.
-2. [Add content-quality checks](02-content-quality.md) — queued.
-3. [Expose provider readiness and product states](03-live-readiness.md) — queued; budget/export fixes already merged.
-4. [Explain role fit with evidence](04-fit-report.md) — queued.
-5. [Inspect rendered document layout](05-layout-review.md) — queued.
+Implementation status (2026-10-24):
+0. Local OpenAI failure identified and patched: reviewer reference namespaces; draft XML export.
+1. Composition planning implemented and tested.
+2. Content-quality warnings implemented and tested.
+3. Readiness UI, synthetic provider test and diagnostics implemented; Windows CI results pending.
+4. Named history and evidence-linked fit reports implemented and tested.
+5. Optional layout rendering/inspection implemented; actual LibreOffice conversion and visual verification pending.
+
+See [release verification](../release-verification.md) for measured results and limitations.
+The user has created the GitHub issues; their numbers/status cannot be read through this workspace's blocked API.
 
 Only completed, tested behavior should be marked done. No adoption of third-party code is implied.
 
