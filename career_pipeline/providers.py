@@ -84,7 +84,7 @@ class AnthropicProvider:
         client = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'], max_retries=0)
         instructions = ROLE_RULES[payload['role']] if task == 'review' else GENERATION
         schema = ReviewResponse.model_json_schema() if task == 'review' else Packet.model_json_schema()
-        for attempt in range(3):
+        for attempt in range(getattr(self, 'max_attempts', 3)):
             try:
                 response = client.messages.create(model=model, max_tokens=max_tokens, temperature=0,
                     system=RULES + '\n' + instructions + '\nApproved professional guidance:\n' + payload.get('style', ''),
@@ -99,7 +99,7 @@ class AnthropicProvider:
                 return {'result': result, 'input_tokens': response.usage.input_tokens,
                         'output_tokens': response.usage.output_tokens}
             except (anthropic.RateLimitError, anthropic.InternalServerError, anthropic.APIConnectionError):
-                if attempt == 2:
+                if attempt == getattr(self, 'max_attempts', 3) - 1:
                     raise
                 time.sleep(0.5 * 2 ** attempt)
 
@@ -126,12 +126,18 @@ class Gateway:
         # UTF-8 bytes plus output cap are conservative token bounds. Reserve for retries;
         # settle successful calls to reported actual usage rather than accumulating unused bounds.
         size = len(json.dumps(payload).encode()) + len(json.dumps(schema).encode()) + len(RULES.encode()) + len(GENERATION.encode()) + sum(len(s.encode()) for s in ROLE_RULES.values()) + 512
-        reservation = attempts * (size + self.settings.max_output_tokens)
+        per_attempt = size + self.settings.max_output_tokens
+        attempts = min(attempts, self.settings.max_calls - self.calls,
+                       (self.settings.token_budget - self.tokens) // per_attempt)
+        if attempts < 1:
+            raise ValueError('provider call/token budget exhausted before request')
+        reservation = attempts * per_attempt
         if self.calls + attempts > self.settings.max_calls or self.tokens + reservation > self.settings.token_budget:
             raise ValueError('provider call/token budget exhausted before request')
         self.calls += attempts
         try:
             adapter = {'mock': MockProvider, 'anthropic': AnthropicProvider, 'openai': OpenAIProvider}[provider]()
+            adapter.max_attempts = attempts
             raw = (adapter.complete(task, payload, model) if provider == 'mock' else
                    adapter.complete(task, payload, model, self.settings.max_output_tokens))
         except Exception:
@@ -199,7 +205,7 @@ class OpenAIProvider:
             claim_ids = [c['id'] for section in ('resume', 'cover_letter') for c in payload.get('packet', {}).get(section, [])]
             if claim_ids:
                 schema['properties']['reviewed_claim_ids']['items'] = {'type': 'string', 'enum': claim_ids}
-        for attempt in range(3):
+        for attempt in range(getattr(self, 'max_attempts', 3)):
             try:
                 response = client.chat.completions.create(model=model, max_tokens=max_tokens,
                     messages=[{'role': 'system', 'content': RULES + '\n' + instructions + '\nApproved professional guidance:\n' + payload.get('style', '')},
@@ -219,6 +225,6 @@ class OpenAIProvider:
                 return {'result': result, 'input_tokens': response.usage.prompt_tokens,
                         'output_tokens': response.usage.completion_tokens}
             except (openai.RateLimitError, openai.InternalServerError, openai.APIConnectionError):
-                if attempt == 2:
+                if attempt == getattr(self, 'max_attempts', 3) - 1:
                     raise
                 time.sleep(0.5 * 2 ** attempt)

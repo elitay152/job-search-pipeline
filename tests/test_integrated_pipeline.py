@@ -358,3 +358,27 @@ def test_live_negative_verdict_is_not_retried_or_waived(monkeypatch,career,store
     assert m['status']=='needs_review'
     assert len(m['versions'][0]['reviews']['evidence']['attempts'])==1
     with pytest.raises(ValueError):approve(store,m['id'],career,True)
+
+
+def test_intake_scopes_each_education_record_to_its_own_degree(tmp_path):
+    from career_pipeline.intake import import_intake
+    root=tmp_path/'intake';root.mkdir()
+    degrees=[{'degree':'MS Data Analytics','institution':'Example University','completed_month':'2023-06'},
+             {'degree':'BS Nursing','institution':'Example College','completed_month':'2015-06'},
+             {'degree':'Doctor Information Technology','institution':'Example Institute','status':'in progress; dissertation phase'}]
+    draft={'display_name':'Synthetic Candidate','records':[
+        {'id':'education','topic':'MS Data Analytics','record_type':'education'}]}
+    ledger={'confirmations':[{'id':'degrees-confirmed','status':'user_confirmed_for_listed_facts_only',
+        'record_ids':['education'],'confirmed_facts':{'degrees':degrees}}]}
+    (root/'career.evidence-draft.json').write_text(json.dumps(draft))
+    (root/'user-confirmations.json').write_text(json.dumps(ledger))
+    result=import_intake(root,tmp_path/'career.json')
+    assert len(result.evidence)==3
+    for evidence,degree in zip(result.evidence,degrees):
+        assert evidence.project==degree['degree']
+        assert evidence.actions==evidence.confirmed_statements
+        assert evidence.confirmed_statements[0].startswith(evidence.project+' | ')
+        assert evidence.fact_details['degrees']==[degree]
+        assert evidence.eligible
+    assert 'in progress; dissertation phase' in result.evidence[-1].confirmed_statements[0]
+    assert len({e.id for e in result.evidence})==3

@@ -202,6 +202,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                     store.save(manifest)
                     role_payload = dict(payload, packet=packet.model_dump(), role=role,
                         career=career.model_dump(mode='json'))
+                    role_payload.pop('evidence', None)  # The full career already contains these records.
                     try:
                         def review_with_correction():
                             attempts = version['reviews'][role].setdefault('attempts', [])

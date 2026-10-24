@@ -138,3 +138,18 @@ def test_complete_tool_result_with_stop_reason(monkeypatch):
     body["choices"][0]["finish_reason"]="stop"
     install_transport(monkeypatch,lambda _:httpx.Response(200,json=body))
     assert OpenAIProvider().complete("generate",{},"gpt-4.1")["result"]==result
+
+
+def test_gateway_limits_retries_to_remaining_budget(monkeypatch,tmp_path):
+    import openai
+    from career_pipeline.providers import Gateway
+    calls=[]
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(500,json={'error':{'message':'synthetic failure','type':'server_error'}})
+    install_transport(monkeypatch,handler)
+    gateway=Gateway(Store(str(tmp_path/'budget.sqlite')),Settings(generator='openai',token_budget=100000))
+    with pytest.raises(openai.APIStatusError):
+        gateway.call('generate',{'style':'x'*50000})
+    assert len(calls)==1
+    assert gateway.tokens<=100000
