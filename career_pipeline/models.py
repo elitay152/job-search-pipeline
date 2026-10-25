@@ -24,7 +24,7 @@ def valid_period(value):
 
 class Source(BaseModel):
     reference: str
-    status: Literal['user_confirmed', 'uncertain']
+    status: Literal['user_provided', 'user_confirmed', 'uncertain']
     excerpt: str | None = None
 
 class Technology(BaseModel):
@@ -72,7 +72,7 @@ class Evidence(BaseModel):
     employment_ids: list[str] = []
     project: str
     actions: list[str]
-    ownership: Literal['owned', 'contributed', 'familiarity']
+    ownership: Literal['owned', 'contributed', 'familiarity', 'unspecified']
     technologies: list[Technology]
     outcomes: list[str] = []
     metrics: list[Metric] = []
@@ -107,7 +107,7 @@ class Evidence(BaseModel):
 
     @property
     def eligible(self):
-        return all(s.status == 'user_confirmed' for s in self.sources)
+        return all(s.status in ('user_provided', 'user_confirmed') for s in self.sources)
 
 class Presentation(BaseModel):
     include_publications: bool = True

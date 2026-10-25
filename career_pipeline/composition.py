@@ -1,5 +1,6 @@
 """Plan document organization using eligible facts, without creating new career claims."""
 from .review import group_key
+from .baseline import employment_baseline
 
 
 def build_composition_plan(career, selected):
@@ -26,9 +27,9 @@ def build_composition_plan(career, selected):
     for section in ordered:
         section['themes'] = [{'topic': topic, 'evidence_ids': ids} for topic, ids in section['themes'].items()]
         section['target_bullets'] = min(len(section['evidence_ids']), career.presentation.minimum_recent_bullets)
-    return {'version': 'composition-v1', 'experience_sections': ordered, 'section_anchors': anchors,
+    return {'version': 'composition-v2', 'employment_baseline': employment_baseline(career), 'experience_sections': ordered, 'section_anchors': anchors,
         'resume_instructions': [
-            'Use the ordered role sections. Do not combine different employers into one experience heading.',
+            'Saved employment_baseline jobs define immutable headers and chronology, including jobs with no selected bullets. Tailor only supported bullet content within its evidence-defined scope. Shared-role evidence remains shared; do not assign it to one job or duplicate it. Use the ordered role sections. Do not combine different employers into one experience heading.',
             'Themes are candidate groupings, not proof of causality. Combine facts only when sources support their relationship.',
             'Compose complete action-and-context bullets; include outcomes only when linked evidence supports them.',
             'Preserve ownership, metric qualifiers and dates. Use readable number formatting without changing values or units.',

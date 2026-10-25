@@ -444,13 +444,12 @@ def test_education_and_publications_only_cannot_pass_as_complete_resume(career, 
                     cover_letter=[])
     m = run('Required: Kubernetes administration.', career, store,
             Settings(include_cover_letter=False, max_revisions=0), seed_packet=packet)
-    assert m['status'] == 'needs_review'
-    assert any(f['code'] == 'missing_employment_history' for f in m['validation'])
-    with pytest.raises(ValueError):
-        approve(store, m['id'], career, True)
-    with pytest.raises(ValueError):
-        export(store, m['id'], career, tmp_path/'final')
-    assert export(store, m['id'], career, tmp_path/'draft', draft=True)
+    assert m['status'] == 'draft'
+    assert m['baseline_restored_claims']
+    assert any(c['id'].startswith('baseline-') for c in m['versions'][-1]['packet']['resume'])
+    assert not m['validation']
+    approve(store, m['id'], career, True)
+    assert export(store, m['id'], career, tmp_path/'final')
 
 
 def test_uncertain_employment_is_not_forced_into_resume(career, store):

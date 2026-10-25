@@ -34,15 +34,9 @@ def test_first_use_and_confirmed_evidence_form(workspace):
     assert not app.exception
     career = Career.model_validate_json((workspace / 'local/career.json').read_text())
     assert career.display_name == 'Morgan Example'
-    assert not career.evidence[0].eligible
-    assert field(app, 'button', 'Create my draft').disabled
-    field(app, 'selectbox', 'Add or edit evidence').select(career.evidence[0].id).run()
-    field(app, 'checkbox', 'I reviewed these facts and their sources and confirm they are accurate').check()
-    field(app, 'button', 'Save evidence').click().run()
-    assert not app.exception
-    confirmed = Career.model_validate_json((workspace / 'local/career.json').read_text())
-    assert confirmed.evidence[0].eligible
-    assert confirmed.evidence[0].id == career.evidence[0].id
+    assert career.evidence[0].eligible
+    assert career.evidence[0].sources[0].status == 'user_provided'
+    assert not any('confirm they are accurate' in c.label for c in app.checkbox)
 
 
 def test_mock_application_previews_and_readable_reviews(workspace):
@@ -84,14 +78,13 @@ def test_gap_answers_update_library_and_survive_new_session(workspace):
     answer.set_value('Configured Kubernetes production administration for a synthetic test environment.')
     next(e for e in app.text_input if e.key and e.key.startswith('tool_')).set_value('Kubernetes')
     next(e for e in app.text_input if e.key and e.key.startswith('usage_')).set_value('Production administration')
-    next(e for e in app.checkbox if e.key and e.key.startswith('gap_confirm_')).check()
     field(app, 'button', 'Save answer').click().run()
     assert not app.exception
     saved = Career.model_validate_json((workspace / 'local/career.json').read_text())
     assert any(e.id.startswith('answer-') and e.eligible for e in saved.evidence)
     fresh = AppTest.from_file(str(ROOT / 'career_pipeline/ui.py')).run()
     assert not fresh.exception
-    assert any('3' == metric.value for metric in fresh.metric if metric.label == 'Confirmed evidence')
+    assert any('3' == metric.value for metric in fresh.metric if metric.label == 'Saved source records')
 
 
 def test_corrupt_library_has_recovery_without_overwrite(workspace):
@@ -160,3 +153,23 @@ def test_no_requirements_shows_empty_state_instead_of_zero_match(workspace):
     field(app, 'text_area', 'Paste the job description').set_value('About the job\nWelcome to our wonderful company.').run()
     assert any('No job requirements were recognized' in w.value for w in app.warning)
     assert not any(m.label == 'Direct evidence' for m in app.metric)
+
+
+def test_resume_upload_saves_history_without_confirmation_step(workspace, monkeypatch):
+    monkeypatch.setenv('CAREER_OPENAI_API_KEY', 'synthetic-key')
+    monkeypatch.delenv('CAREER_OPENAI_KEY_VARIABLE', raising=False)
+    from types import SimpleNamespace
+    uploaded = SimpleNamespace(name='synthetic-resume.docx', getvalue=lambda: b'synthetic upload bytes')
+    monkeypatch.setattr('streamlit.file_uploader', lambda label, **kwargs:
+                        uploaded if label == 'Load a resume as my history' else None)
+    imported = Career.model_validate_json((workspace/'fixtures/career.json').read_text(encoding='utf-8'))
+    for e in imported.evidence:
+        for source in e.sources: source.status = 'user_provided'
+    monkeypatch.setattr('career_pipeline.resume_intake.extract_resume', lambda *args: (imported, 'Synthetic source text'))
+    app = AppTest.from_file(str(ROOT/'career_pipeline/ui.py')).run()
+    field(app, 'button', 'Import resume').click().run()
+    assert not app.exception
+    saved = Career.model_validate_json((workspace/'local/career.json').read_text(encoding='utf-8'))
+    assert saved.evidence and all(e.eligible for e in saved.evidence)
+    assert list((workspace/'local/resume_sources').glob('*.docx'))
+    assert not any('confirm this' in c.label.lower() or 'confirm they' in c.label.lower() for c in app.checkbox)

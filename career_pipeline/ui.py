@@ -12,7 +12,7 @@ from career_pipeline.models import Career, Evidence, Employment, Packet, Setting
 from career_pipeline.store import Store, digest
 from career_pipeline.pipeline import run
 from career_pipeline.export import approve, export, preview, export_pdf
-from career_pipeline.workbench import save_profile, analyze_job, add_gap_answer, fit_report, application_label
+from career_pipeline.workbench import save_profile, analyze_job, add_gap_answer, fit_report, application_label, user_provided_profile
 from career_pipeline.job_input import load_job_url
 from career_pipeline.models import Requirement, ContentQualitySettings
 from career_pipeline.report import review_report
@@ -69,8 +69,7 @@ with st.sidebar:
     st.header('Workspace')
     st.caption('App version: ' + app_version())
     st.caption('Personal evidence is saved on this computer. It is not included in the public repository.')
-    st.metric('Confirmed evidence', sum(e.eligible for e in career.evidence))
-    st.metric('Needs confirmation', sum(not e.eligible for e in career.evidence))
+    st.metric('Saved source records', sum(e.eligible for e in career.evidence))
     with st.expander('Try the synthetic example'):
         st.caption('Replaces the current workspace with fictional evidence. Export a backup first if needed.')
         if st.button('Load synthetic example'):
@@ -80,7 +79,7 @@ with st.sidebar:
         upload = st.file_uploader('Import an evidence backup', type=['json'])
         if st.button('Import backup', disabled=upload is None):
             try:
-                save_career(Career.model_validate_json(upload.getvalue()))
+                save_career(user_provided_profile(Career.model_validate_json(upload.getvalue())))
                 st.rerun()
             except ValueError as exc:
                 validation_message(exc)
@@ -89,7 +88,7 @@ with st.sidebar:
         path = st.text_input('Evidence file', placeholder='private/career-v3.json')
         if st.button('Load evidence file', disabled=not path):
             try:
-                save_career(Career.model_validate_json(Path(path).read_text(encoding='utf-8')))
+                save_career(user_provided_profile(Career.model_validate_json(Path(path).read_text(encoding='utf-8'))))
                 st.rerun()
             except (ValueError, OSError):
                 st.error('Could not load a valid evidence file. Check the path and file format.')
@@ -98,7 +97,29 @@ apply_tab, evidence_tab, review_tab, history_tab = st.tabs(['Create application'
 
 with evidence_tab:
     st.header('My experience')
-    st.write('Add facts you can stand behind. Keep estimates, shared contributions and training clearly labeled.')
+    st.write('Your uploaded resumes and saved entries are the source of truth. Reviews check generated output against them; you do not need to confirm each input fact again.')
+    resume_upload = st.file_uploader('Load a resume as my history', type=['docx', 'txt'])
+    intake_provider = st.selectbox('Resume extraction provider', ['openai', 'anthropic'])
+    st.caption('Extraction sends this resume to the selected provider and may incur API charges. The original is saved locally; extracted history is added without deleting existing facts.')
+    intake_problem = configuration_problem(intake_provider)
+    if resume_upload is not None and intake_problem:
+        st.error(intake_problem)
+    if st.button('Import resume', disabled=resume_upload is None or bool(intake_problem)):
+        try:
+            from career_pipeline.resume_intake import extract_resume, merge_resume
+            with st.spinner('Extracting job history and source bullets…'):
+                data = resume_upload.getvalue()
+                imported, source_text = extract_resume(data, resume_upload.name, intake_provider, DEFAULT_MODELS[intake_provider])
+                folder = Path('local/resume_sources')
+                folder.mkdir(parents=True, exist_ok=True)
+                (folder / (digest(data.hex()) + Path(resume_upload.name).suffix.lower())).write_bytes(data)
+                save_career(merge_resume(career, imported))
+            st.rerun()
+        except ValueError as exc:
+            validation_message(exc)
+        except Exception as exc:
+            st.error(failure_message(exc))
+    st.info('Employment history is your resume baseline. Every saved job stays in reverse chronological order; job tailoring changes supported bullets, not your employers, titles or dates.')
     with st.form('identity'):
         name = st.text_input('Name', career.display_name)
         contact = st.text_area('Contact details', '\n'.join(career.contact), placeholder='Email, location, portfolio link — one per line')
@@ -140,14 +161,14 @@ with evidence_tab:
     if not career.evidence:
         st.info('Start with a role above, then add an accomplishment below. You can also load the synthetic example from the sidebar.')
     for e in filtered:
-        with st.expander(f'{"Confirmed" if e.eligible else "Needs confirmation"} · {e.project}'):
+        with st.expander(f'{e.project}'):
             st.caption(f'{e.kind.title()} · {e.ownership.title()}')
             for statement in e.supported_wording:
                 st.write(statement)
             if e.technologies:
                 st.write('**Tools:** ' + '; '.join(f'{t.name} — {t.usage} ({t.context})' for t in e.technologies))
             for source in e.sources:
-                st.caption(f'Source: {source.reference} · {"confirmed" if source.status == "user_confirmed" else "unconfirmed"}')
+                st.caption(f'Source: {source.reference}')
             if e.prohibited_inferences:
                 st.write('**Do not imply:** ' + '; '.join(e.prohibited_inferences))
     edit_id = st.selectbox('Add or edit evidence', ['New evidence'] + [e.id for e in career.evidence],
@@ -159,9 +180,9 @@ with evidence_tab:
         kind = st.selectbox('Type', kinds, index=kinds.index(current.kind) if current else 0)
         roles = st.multiselect('Related roles', [j.id for j in career.employments], default=current.employment_ids if current else [],
             format_func=lambda ident: next(f'{j.employer} — {j.official_title}' for j in career.employments if j.id == ident))
-        ownerships = ['contributed', 'owned', 'familiarity']
+        ownerships = ['contributed', 'owned', 'familiarity', 'unspecified']
         ownership = st.selectbox('Your involvement', ownerships, index=ownerships.index(current.ownership) if current else 0,
-            format_func=lambda x: {'contributed': 'Shared contribution', 'owned': 'Owned this work', 'familiarity': 'Familiarity / learning'}[x])
+            format_func=lambda x: {'contributed': 'Shared contribution', 'owned': 'Owned this work', 'familiarity': 'Familiarity / learning', 'unspecified': 'Not specified in source'}[x])
         statements = st.text_area('Factual statements — one per line', '\n'.join(current.supported_wording) if current else '',
             help='Describe what you personally did. Preserve metric units and qualifiers such as estimated or expected.')
         actions = st.text_area('Actions you personally performed — one per line', '\n'.join(current.actions) if current else '')
@@ -174,11 +195,7 @@ with evidence_tab:
             column_config={'qualifier': st.column_config.SelectboxColumn('Qualifier', options=['realized', 'estimated', 'expected'], required=True)}, key='metrics_' + edit_id)
         prohibited = st.text_area('What this must not imply — one per line', '\n'.join(current.prohibited_inferences) if current else '',
             placeholder='Peer training does not mean people management')
-        sources = st.data_editor([s.model_dump() for s in current.sources] if current else
-            [{'reference': 'Personal confirmation', 'status': 'uncertain', 'excerpt': ''}], num_rows='dynamic',
-            column_config={'status': st.column_config.SelectboxColumn('Verification', options=['uncertain', 'user_confirmed'], required=True)}, key='sources_' + edit_id)
-        confirmed = st.checkbox('I reviewed these facts and their sources and confirm they are accurate', key='confirm_' + edit_id)
-        st.caption('Without confirmation, this record is saved for clarification and excluded from generation. Confirmation applies to all listed sources.')
+        st.caption('Saving adds these statements as user-provided source data. Generated claims must stay supported by them.')
         if st.form_submit_button('Save evidence'):
             try:
                 if not project.strip() or not lines(statements):
@@ -189,7 +206,7 @@ with evidence_tab:
                     technologies=[t for t in tools if str(t.get('name') or '').strip()],
                     metrics=[m for m in metrics if str(m.get('unit') or '').strip()],
                     prohibited_inferences=lines(prohibited),
-                    sources=[dict(s, status='user_confirmed' if confirmed else 'uncertain') for s in sources if str(s.get('reference') or '').strip()])
+                    sources=[{'reference': 'User entry', 'status': 'user_provided', 'excerpt': statements}])
                 record = Evidence.model_validate(data)
                 data = career.model_dump(mode='json')
                 data['evidence'] = [e for e in data['evidence'] if e['id'] != record.id] + [record.model_dump(mode='json')]
@@ -260,12 +277,11 @@ with apply_tab:
                         usage = st.text_input('How you used it', key='usage_' + job_hash[:12] + q.id)
                         context = st.selectbox('Experience context', ['professional', 'portfolio', 'academic', 'training'], key='context_' + job_hash[:12] + q.id)
                         ownership = st.selectbox('Scope of involvement', ['contributed', 'owned', 'familiarity'], key='ownership_' + job_hash[:12] + q.id)
-                        confirm = st.checkbox('I confirm this answer is accurate', key='gap_confirm_' + job_hash[:12] + q.id)
                         if st.form_submit_button('Save answer'):
                             try:
                                 if choice == 'Add experience':
                                     updated = add_gap_answer(career, q, answer, role_ids=role_ids, tool=tool, usage=usage,
-                                        context=context, ownership=ownership, confirmed=confirm, jd_hash=job_hash)
+                                        context=context, ownership=ownership, confirmed=True, jd_hash=job_hash)
                                     st.session_state.career = updated.model_dump(mode='json')
                                 store.event(intake_id, 'follow_up', {'requirement_id': q.id, 'answer': answer if choice == 'Add experience' else choice, 'kind': 'evidence' if choice == 'Add experience' else 'gap'})
                                 st.rerun()
@@ -276,7 +292,7 @@ with apply_tab:
     mode = st.radio('Generation mode', ['Practice with mock models', 'Use OpenAI', 'Use Anthropic'], horizontal=True,
         help='Practice mode exercises the pipeline without API credentials; it does not use live model reviewers.')
     provider = {'Practice with mock models': 'mock', 'Use OpenAI': 'openai', 'Use Anthropic': 'anthropic'}[mode]
-    st.caption(f'{sum(e.eligible for e in career.evidence)} confirmed evidence records available. Unconfirmed records will not be used.')
+    st.caption(f'{sum(e.eligible for e in career.evidence)} saved source records available. Generated claims are checked against your inputs.')
     if provider == 'mock':
         st.info('Practice mode copies source statements. To create a polished application, choose a live provider above and configure its API key on this computer.')
     if provider != 'mock':

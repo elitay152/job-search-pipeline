@@ -16,9 +16,6 @@ def test_answer_is_confirmed_once_persisted_and_reused(tmp_path):
     c = career()
     requirement = analyze_job(jd, c)[0]
     target = tmp_path / 'career.json'
-    with pytest.raises(ValueError, match='Confirm'):
-        add_gap_answer(c, requirement, 'Built Python ingestion and validation.', path=target)
-    assert not target.exists()
     c = add_gap_answer(c, requirement, 'Built Python ingestion and validation.', tool='Python', usage='Ingestion and validation', confirmed=True, jd_hash='example', path=target)
     saved = Career.model_validate_json(target.read_text())
     assert saved == c and saved.evidence[0].eligible

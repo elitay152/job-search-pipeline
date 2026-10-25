@@ -11,6 +11,7 @@ from .store import Store, digest, now
 from .review import audit, reviews, document_plan, group_key
 from .grounding import accepted_assessments
 from .composition import build_composition_plan
+from .baseline import employment_baseline, ensure_history_bullets
 from .content_quality import check_content_quality
 from .diagnostics import failure_details
 
@@ -147,7 +148,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
     manifest = {'id': run_id, 'created': now(), 'updated': now(), 'status': 'running',
         'application': {k: str((application or {}).get(k, '')).strip()[:300] for k in ('company', 'role')},
         'input_hash': digest(jd), 'evidence_hash': digest(career.model_dump(mode='json')),
-        'prompt_version': PROMPT_VERSION, 'schema_version': '4', 'style': style,
+        'prompt_version': PROMPT_VERSION, 'schema_version': '5', 'employment_baseline': employment_baseline(career), 'style': style,
         'settings': settings.model_dump(), 'strategy': strategy, 'stages': [], 'versions': [],
         'revision_count': 0, 'artifacts': [], 'approved': False,
         'review_mode': settings.reviewer, 'generation_mode': settings.generator,
@@ -169,6 +170,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
             raise
     try:
         store.event(run_id, 'inputs', {'jd': jd, 'career': career.model_dump(mode='json')})
+        stage('baseline_sources', lambda: ensure_history_bullets(Packet(resume=[], cover_letter=[]), career))
         requirements = stage('extract', lambda: extract(jd))
         requirements = stage('retrieve', lambda: map_requirements(requirements, career))
         selected = {i for q in requirements for i in q.evidence_ids}
@@ -201,6 +203,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
         manifest['composition_plan'] = build_composition_plan(career, selected)
         if not settings.include_cover_letter:
             manifest['composition_plan']['cover_letter_paragraphs'] = []
+        plan['employment_baseline'] = manifest['employment_baseline']
         manifest['document_plan'] = plan
         manifest['requirements'] = [q.model_dump() for q in requirements]
         manifest['discovery_questions'] = discovery_questions(requirements)
@@ -211,6 +214,9 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                    'style': style['instructions'], 'document_plan': plan, 'composition_plan': manifest['composition_plan'],
                    'factual_mode': settings.factual_mode}
         packet = seed_packet or stage('generate', lambda: Packet.model_validate(gateway.call('generate', payload)))
+        original_claims = {c.id for c in packet.resume}
+        packet = stage('baseline_bullets', lambda: ensure_history_bullets(packet, career))
+        manifest['baseline_restored_claims'] = [c.id for c in packet.resume if c.id not in original_claims]
         seen = set()
         last_passing = None
         for revision in range(settings.max_revisions + 1):
@@ -306,6 +312,9 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
             seen.add(signature)
             candidate = stage('revise', lambda: Packet.model_validate(gateway.call('revise', dict(payload,
                 packet=packet.model_dump(), findings=actionable))))
+            before_baseline = {c.id for c in candidate.resume}
+            candidate = ensure_history_bullets(candidate, career)
+            manifest['baseline_restored_claims'].extend(c.id for c in candidate.resume if c.id not in before_baseline)
             store.event(run_id, 'revision_candidate', {'packet': candidate.model_dump(),
                 'validation': [f.model_dump() for f in audit(candidate, career, include_cover_letter=settings.include_cover_letter)]})
             if digest(candidate.model_dump()) in seen:

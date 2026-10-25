@@ -8,6 +8,8 @@ from .store import digest, now
 from .grounding import accepted_assessments
 
 from .text_safety import XML_INVALID
+from .baseline import employment_baseline, evidence_roles
+from types import SimpleNamespace
 
 
 def require_clean_final_text(packet, career):
@@ -33,7 +35,8 @@ def resume_date(value):
 
 def preview(packet, career):
     index = {e.id: e for e in career.evidence}
-    roles = {r.id: r for r in career.employments}
+    baseline = employment_baseline(career)
+    roles = {j['id']: SimpleNamespace(**j) for j in baseline['jobs']}
     resume = [f'# {career.display_name}', *career.contact]
     if packet.skills:
         categories = {}
@@ -51,35 +54,45 @@ def preview(packet, career):
                 categories.setdefault(tech.category, []).append(label)
         if categories:
             resume += ['## Technical Skills'] + [f'{name}: ' + ', '.join(items) for name, items in categories.items()]
-    groups = {}
+    job_claims = {ident: [] for ident in roles}
+    shared_claims = {}
+    unplaced = []
     sections = {'project': [], 'education': [], 'publication': [], 'skill': []}
     for claim in packet.resume:
-        e = index.get(claim.evidence_ids[0])
+        e = index.get(claim.evidence_ids[0]) if claim.evidence_ids else None
         if e and e.kind != 'experience':
             sections[e.kind].append(claim)
             continue
-        if e and e.employment_ids:
-            key = tuple(sorted(e.employment_ids))
+        linked = [index[i] for i in claim.evidence_ids if i in index and index[i].kind == 'experience']
+        scope = tuple(sorted({ident for item in linked for ident in evidence_roles(item, baseline)}))
+        if len(scope) == 1 and scope[0] in job_claims:
+            job_claims[scope[0]].append(claim)
+        elif scope:
+            shared_claims.setdefault(scope, []).append(claim)
         else:
-            key = (e.employer, e.official_title, resume_title(e), e.start, e.end) if e else ('unknown',)
-        if key not in groups:
-            groups[key] = (e, [])
-        groups[key][1].append(claim)
-    if groups:
+            unplaced.append(claim)
+    shared_labels = {}
+    for scope, claims in shared_claims.items():
+        jobs = [roles[i] for i in scope if i in roles]
+        label = 'Shared across ' + '; '.join(f'{resume_title(j)} at {j.employer}' for j in jobs)
+        for claim in claims:
+            shared_labels[claim.id] = label
+            for ident in scope:
+                if ident in job_claims:
+                    job_claims[ident].append(claim)
+    if roles or unplaced:
         resume += ['## Professional Experience']
-    for e, claims in groups.values():
-        if e and e.employment_ids:
-            jobs = [roles[i] for i in e.employment_ids]
-            resume += ['### ' + ' / '.join(dict.fromkeys(j.employer for j in jobs))]
-            for job in jobs:
-                resume += [f'{resume_title(job)} | {resume_date(job.start)} – {resume_date(job.end)}']
-        elif e and e.official_title:
-            resume += [f'### {resume_title(e)} — {e.employer}']
-            if e.start:
-                resume += [f'{resume_date(e.start)} – {resume_date(e.end)}']
-        elif e and e.employer:
-            resume += [f'### {e.employer}']
-        resume += [f'- {claim.text}' for claim in claims]
+    # Headers come only from saved history, never the model's chosen bullets or their order.
+    for ident, job in roles.items():
+        resume += [f'### {resume_title(job)} — {job.employer}']
+        if job.start:
+            resume += [f'{resume_date(job.start)} – {resume_date(job.end)}']
+        for claim in job_claims[ident]:
+            scope_label = shared_labels.get(claim.id)
+            resume += [f'- {scope_label}: {claim.text}' if scope_label else f'- {claim.text}']
+    if unplaced:
+        resume += ['### Experience requiring role clarification']
+        resume += [f'- {claim.text}' for claim in unplaced]
     for kind, heading in [('project', 'Selected Projects'), ('education', 'Education'), ('publication', 'Publications')]:
         if sections[kind]:
             resume += ['## ' + heading]
@@ -131,6 +144,8 @@ def export(store, run_id, career, directory='artifacts', draft=False):
     packet = Packet.model_validate(m['versions'][-1]['packet'])
     if digest(career.model_dump(mode='json')) != m['evidence_hash']:
         raise ValueError('Evidence snapshot mismatch')
+    if any(f.code in ('missing_employment_history', 'missing_source_bullets') for f in audit(packet, career)):
+        raise ValueError('Resume has a job without bullets. Create a new run using your source history before exporting.')
     if not draft:
         require_review_complete(m)
     if not draft and (packet_audit(packet, career, m) or not m.get('approved') or m.get('approved_packet_hash') != digest(packet.model_dump())):

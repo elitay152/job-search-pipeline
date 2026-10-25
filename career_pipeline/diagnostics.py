@@ -21,7 +21,9 @@ def failure_details(exc):
         code, message = 'response_schema_invalid', 'Structured data did not match the required schema. The candidate or review was not accepted. Inspect the saved stage; changing your API key will not fix this schema error.'
     elif isinstance(exc, ValueError):
         value = str(exc)
-        if value == 'provider call/token budget exhausted before request':
+        if value == 'Every saved job needs source bullets before generation. Add accomplishments under My experience; no empty job section will be exported.':
+            code, message = 'missing_source_bullets', value
+        elif value == 'provider call/token budget exhausted before request':
             code, message = 'budget_exhausted', 'The run reached its call/token budget before the next request. Increase the budget under Writing style & advanced settings, or use fewer revision cycles. No request was sent for the blocked stage.'
         elif value in CONTRACT_ERRORS:
             code, message = 'review_contract_invalid', CONTRACT_ERRORS[value] + ' The review was not accepted; saved attempts show whether the bounded correction was used.'

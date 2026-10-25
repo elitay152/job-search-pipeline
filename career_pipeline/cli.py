@@ -48,6 +48,11 @@ def main():
     inspect = sub.add_parser('inspect')
     inspect.add_argument('run_id')
     inspect.add_argument('--output', required=True)
+    resume = sub.add_parser('import-resume')
+    resume.add_argument('--file', required=True)
+    resume.add_argument('--provider', choices=['openai', 'anthropic'], default='openai')
+    resume.add_argument('--model')
+    resume.add_argument('--output', default='local/career.json')
     imp = sub.add_parser('import-intake')
     imp.add_argument('--intake', required=True)
     imp.add_argument('--output', required=True)
@@ -90,6 +95,16 @@ def main():
                 print(approve(store, args.run_id, career, args.reviewed)['status'])
             else:
                 print('\n'.join(str(x) for x in export(store, args.run_id, career, args.output, args.draft)))
+        elif args.command == 'import-resume':
+            from .resume_intake import extract_resume, merge_resume
+            from .workbench import save_profile
+            from .models import DEFAULT_MODELS
+            source = Path(args.file)
+            imported, _ = extract_resume(source.read_bytes(), source.name, args.provider, args.model or DEFAULT_MODELS[args.provider])
+            target = Path(args.output)
+            current = Career.model_validate_json(target.read_text(encoding='utf-8')) if target.exists() else Career(display_name='', evidence=[])
+            save_profile(merge_resume(current, imported), target)
+            print('Resume history imported and saved locally.')
         elif args.command == 'import-intake':
             from .intake import import_intake
             result = import_intake(args.intake, args.output)

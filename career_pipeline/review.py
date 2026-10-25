@@ -2,6 +2,7 @@
 import re
 from .models import Career, Packet, Finding
 from .text_safety import XML_INVALID
+from .baseline import employment_baseline, evidence_roles
 
 
 def group_key(e):
@@ -47,19 +48,28 @@ def audit(packet, career, grounded_claims=None, include_cover_letter=True):
         if not valid and claim.id not in grounded_claims:
             findings.append(Finding(role='evidence', claim_id=claim.id, evidence_ids=claim.evidence_ids,
                 severity='error', code='unsupported_wording', message='Claim is not exact supported wording from every linked, confirmed record.'))
-    # The renderer assigns a passage to its first evidence record's section.
-    rendered_groups = {group_key(index[c.evidence_ids[0]]) for c in packet.resume
-                       if c.evidence_ids and c.evidence_ids[0] in index
-                       and index[c.evidence_ids[0]].kind == 'experience'}
-    eligible_groups = {}
+    baseline = employment_baseline(career)
+    def scope(e):
+        return evidence_roles(e, baseline) or (group_key(e),)
+    rendered_scopes = set()
+    for claim in packet.resume:
+        first = index.get(claim.evidence_ids[0]) if claim.evidence_ids else None
+        if first and first.kind == 'experience':
+            rendered_scopes.update(ident for i in claim.evidence_ids if i in index
+                                  and index[i].kind == 'experience' for ident in scope(index[i]))
+    eligible_scopes = {}
     for e in career.evidence:
         if e.eligible and e.kind == 'experience':
-            eligible_groups.setdefault(group_key(e), []).append(e.id)
-    for group, ids in eligible_groups.items():
-        if group not in rendered_groups:
+            for ident in scope(e):
+                eligible_scopes.setdefault(ident, []).append(e.id)
+    for job in baseline['jobs']:
+        if job['id'] not in eligible_scopes:
+            findings.append(Finding(role='recruiter', severity='error', section='experience', code='missing_source_bullets', message='Saved job has no source bullets. Add source accomplishments before generating or exporting.'))
+    for ident, ids in eligible_scopes.items():
+        if ident not in rendered_scopes:
             findings.append(Finding(role='recruiter', severity='error', section='experience',
                 evidence_ids=ids, code='missing_employment_history',
-                message='A confirmed employment scope has no rendered resume passage. Include supported work history from these sources; do not invent new experience.'))
+                message='A saved employment scope has confirmed evidence but no resume bullet. Include supported work from these sources without changing its scope.'))
     for ident in packet.skills:
         e = index.get(ident)
         if not e or not e.eligible or not e.technologies:
@@ -87,6 +97,12 @@ def reviews(packet, requirements, career, plan=None, grounded_claims=None):
             findings.append(Finding(role='recruiter', requirement_id=q.id, severity='suggestion',
                 code='missing_coverage', section='experience', message='Presentation: relevant evidence is missing from the packet.'))
     if plan:
+        baseline = employment_baseline(career)
+        supported_roles = {ident for e in career.evidence if e.eligible and e.kind == 'experience' for ident in evidence_roles(e, baseline)}
+        for job in baseline['jobs']:
+            if job['id'] not in supported_roles:
+                findings.append(Finding(role='recruiter', section='experience', severity='gap', code='employment_needs_evidence',
+                    message=f"{job['employer']} / {job['official_title']}: history is retained; add confirmed accomplishments to tailor bullets for this role."))
         for pending in plan.get('pending_sources', []):
             findings.append(Finding(role='evidence', section=pending['kind'], evidence_ids=[pending['id']],
                 severity='gap', code='source_confirmation_needed', message='Source-backed record needs factual confirmation before it can be generated.'))

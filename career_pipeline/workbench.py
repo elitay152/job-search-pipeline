@@ -19,9 +19,7 @@ def save_profile(career, path='local/career.json'):
 
 
 def add_gap_answer(career, requirement, answer, *, role_ids=(), tool='', usage='', context='professional',
-                   ownership='contributed', confirmed=False, jd_hash='', path='local/career.json'):
-    if not confirmed:
-        raise ValueError('Confirm the factual answer before adding it to your evidence library.')
+                   ownership='contributed', confirmed=True, jd_hash='', path='local/career.json'):
     if not answer.strip():
         raise ValueError('Describe what you personally did before saving.')
     if requirement.kind == 'constraint':
@@ -33,7 +31,7 @@ def add_gap_answer(career, requirement, answer, *, role_ids=(), tool='', usage='
         kind='experience' if role_ids else 'skill' if tool else 'project',
         actions=[answer.strip()], ownership=ownership,
         technologies=[{'name': tool.strip(), 'usage': usage.strip(), 'context': context}] if tool.strip() else [],
-        sources=[{'reference': 'User-confirmed follow-up ' + now(), 'status': 'user_confirmed', 'excerpt': answer.strip()}],
+        sources=[{'reference': 'User-provided follow-up ' + now(), 'status': 'user_provided', 'excerpt': answer.strip()}],
         confirmed_statements=[answer.strip()],
         fact_details={'requirement_excerpt': requirement.excerpt, 'job_hash': jd_hash})
     updated = career.model_dump(mode='json')
@@ -77,3 +75,12 @@ def requirement_details(requirements, packet=None, answers=None):
 def application_label(manifest):
     info = manifest.get('application', {})
     return ' — '.join(info[k] for k in ('company', 'role') if info.get(k)) or 'Untitled application'
+
+
+def user_provided_profile(career):
+    """An explicit user import supplies authoritative inputs, not external verification."""
+    result = career.model_copy(deep=True)
+    for evidence in result.evidence:
+        for source in evidence.sources:
+            source.status = 'user_provided'
+    return result
