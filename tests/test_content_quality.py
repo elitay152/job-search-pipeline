@@ -28,7 +28,8 @@ def test_factually_supported_document_can_have_presentation_problems():
     assert not audit(p,c)
     findings=check_content_quality(p,c,ContentQualitySettings())
     codes={f.code for f in findings}
-    assert {'fragmented_bullet','scientific_notation','ledger_fragment','disconnected_letter','experience_order'}<=codes
+    assert {'fragmented_bullet','scientific_notation','ledger_fragment','disconnected_letter'}<=codes
+    assert 'experience_order' not in codes  # Saved baseline, not model bullet order, controls chronology.
     assert all(f.severity=='suggestion' and (f.claim_id or f.section) for f in findings)
 
 

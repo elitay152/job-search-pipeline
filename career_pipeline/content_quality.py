@@ -28,7 +28,6 @@ def check_content_quality(packet, career, config, plan=None):
             findings.append(Finding(role='recruiter', severity='suggestion', section='skills',
                 evidence_ids=sorted(set(expected[category])), code='missing_skill_category',
                 message=f'The selected evidence supports the {category} skills category, but it is absent from Technical Skills. Review whether to include the supported tools.'))
-    observed_groups, dates = set(), []
     for claim in packet.resume:
         linked = [index[i] for i in claim.evidence_ids if i in index]
         if not linked or any(e.kind != 'experience' for e in linked):
@@ -37,17 +36,10 @@ def check_content_quality(packet, career, config, plan=None):
         employers.update(e.employer for e in linked if e.employer)
         if config.check_role_structure and len(employers)>1:
             warn('mixed_employer_scope', 'This passage spans different employers. Clarify placement or split it using the actual evidence; do not guess which role owns it.', claim, 'experience', 'recruiter')
-        e=linked[0]  # Match the renderer's grouping, including legacy employment metadata.
-        group=tuple(sorted(e.employment_ids)) if e.employment_ids else (e.employer,e.official_title,str(e.start),str(e.end))
-        start=max((str(roles[i].start) for i in e.employment_ids if i in roles),default=str(e.start or ''))
-        if group not in observed_groups and start:
-            dates.append(start);observed_groups.add(group)
         if len(WORDS.findall(claim.text))<config.minimum_bullet_words:
             warn('fragmented_bullet', 'This experience bullet is very short. Add supported context or combine compatible facts; do not pad it or invent an outcome.', claim, 'experience')
         if LEDGER.search(claim.text):
             warn('ledger_fragment', 'This reads like a source-record label. Compose a complete accomplishment using only supported actions, context and qualifiers.', claim, 'experience')
-    if config.check_role_structure and dates != sorted(dates,reverse=True):
-        warn('experience_order', 'Experience headings are not in reverse chronological order. Reorder the sections without changing dates.', section='experience',role='recruiter')
     for section,claims in [('resume',packet.resume),('cover_letter',packet.cover_letter)]:
         seen=[]
         for claim in claims:

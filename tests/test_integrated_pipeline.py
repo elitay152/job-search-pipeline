@@ -413,3 +413,53 @@ def test_presentation_revision_cannot_replace_passing_packet_with_unsupported_cl
     assert m['versions'][-1]['packet'] == m['versions'][0]['packet']
     assert any(f['severity'] == 'error' for f in m['versions'][1]['findings'])
     assert not m['validation'] and not m['approved']
+
+
+@pytest.mark.parametrize('jd', [
+    'Required: Kubernetes production administration.',
+    'About the job\nWelcome to our wonderful company.',
+    'Experience building Python data ingestion.\nKnowledge of documentation.',
+])
+def test_retrieval_never_erases_confirmed_employment_history(career, store, jd):
+    extra = career.evidence[0].model_copy(deep=True)
+    extra.id = 'second-role-evidence'
+    extra.employment_ids = ['job-2']
+    extra.confirmed_statements = ['Documented reporting definitions.']
+    career.employments.append(Employment(id='job-2', employer='Second Synthetic Co',
+        official_title='Analyst', start='2021-01', end='2023-09'))
+    career.evidence.append(extra)
+    m = run(jd, career, store, Settings(include_cover_letter=False))
+    packet = Packet.model_validate(m['versions'][-1]['packet'])
+    text, letter = preview(packet, career)
+    assert 'Synthetic Warehouse Co' in text and 'Second Synthetic Co' in text
+    assert 'Professional Experience' in text and 'Python' in text
+    assert 'Education' in text and 'Publications' in text
+    assert not letter and not m['validation']
+    assert 'second-role-evidence' in m['selected_evidence']
+
+
+def test_education_and_publications_only_cannot_pass_as_complete_resume(career, store, tmp_path):
+    packet = Packet(resume=[Claim(id=e.id, text=e.supported_wording[0], evidence_ids=[e.id])
+                           for e in career.evidence if e.kind in ('education', 'publication')],
+                    cover_letter=[])
+    m = run('Required: Kubernetes administration.', career, store,
+            Settings(include_cover_letter=False, max_revisions=0), seed_packet=packet)
+    assert m['status'] == 'draft'
+    assert m['baseline_restored_claims']
+    assert any(c['id'].startswith('baseline-') for c in m['versions'][-1]['packet']['resume'])
+    assert not m['validation']
+    approve(store, m['id'], career, True)
+    assert export(store, m['id'], career, tmp_path/'final')
+
+
+def test_uncertain_employment_is_not_forced_into_resume(career, store):
+    uncertain = career.evidence[0].model_copy(deep=True)
+    uncertain.id = 'uncertain-role'
+    uncertain.employment_ids = []
+    uncertain.employer = 'Unverified Synthetic Co'
+    uncertain.sources[0].status = 'uncertain'
+    career.evidence.append(uncertain)
+    m = run('Required: Kubernetes administration.', career, store)
+    assert 'uncertain-role' not in m['selected_evidence']
+    assert not any('uncertain-role' in f.get('evidence_ids', [])
+                   for f in m['validation'] if f['code'] == 'missing_employment_history')

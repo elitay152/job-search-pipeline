@@ -56,3 +56,57 @@ so the earlier Linux runs did not expose the leaked handles. Evaluation now uses
 retain all connection references and verify they are closed before temporary-directory cleanup.
 The updated Linux suite passes 111 tests; the evaluation CLI also completes. Windows CI must
 rerun to confirm the reported platform failure is resolved.
+
+## Job intake and work-history correction
+
+Unbulleted job descriptions could yield no extracted requirements. Selection then retained
+education/publications/standalone skills while omitting employment evidence. Intake now handles
+plain qualification and responsibility lines, numbered lists and Markdown headings, retaining
+original excerpts. Empty extraction displays an explanation rather than zero-match counters.
+
+Selection independently anchors confirmed employment scopes, ranking their evidence by relevance.
+A deterministic completeness gate blocks approval/final export when a confirmed employment scope
+has no rendered resume passage. An unsupported target skill remains a gap and cannot erase real
+career history. Uncertain employment evidence is not forced into the document.
+
+The top-level cover-letter checkbox is persisted through planning, generation, review, and export;
+resume-only runs return no letter claims or files. Default and older runs continue to require both.
+The CLI provides `--resume-only`.
+
+Validation: 124 automated tests passed on Linux, including multiple employment scopes, empty
+retrieval, unsupported target tools, education/publication-only output, plain-text counter updates,
+resume-only approval/export and existing factual gates. Mock evaluation CLI completed. Windows
+CI must verify the branch after push; personal application output was not regenerated here.
+
+Live OpenAI/gpt-4.1 synthetic verification also completed: two requirements recognized from plain
+text, employer and Professional Experience rendered, zero cover-letter claims when unselected,
+and zero final factual-validation errors. It stopped as an unapproved draft after restoring the
+previous passing version following a revision regression (27.46 seconds). This is a workflow
+check using fictional evidence, not a human assessment of writing quality.
+
+## Saved baseline and resume-file intake
+
+- Resume job headers and chronology now come from a versioned saved employment baseline,
+  including supported legacy imports; model bullet selection cannot remove a job header.
+- Missing job bullets are restored verbatim from source records before reviews, with evidence
+  references and restoration IDs retained in the manifest. Missing source bullets stop generation
+  before a model call. Export blocks empty job sections, including older incomplete runs.
+- Shared-role source statements remain explicitly labeled as shared under each referenced role;
+  they are not silently attributed as exclusive work for one role.
+- DOCX/TXT upload and CLI intake extract structured history through the selected provider, validate
+  exact source wording/date/role placement, retain original uploads locally, and merge without
+  deleting saved history. Conflicting dates are not silently overwritten. PDF/OCR is unsupported.
+- Direct entries, uploaded resumes, explicit backup imports and saved gap answers are authoritative
+  `user_provided` inputs, without a redundant confirmation checkbox. Existing confirmed inputs remain
+  usable. Unknown ownership stays unspecified on import; it is not inferred from a job title.
+- Factual review remains output-versus-input checking. User review of the final application is still
+  required. No claim is made that the application independently verifies a person's career facts.
+
+Live synthetic OpenAI intake checks: a TXT fixture extracted one job and its bullet plus education
+and training; a DOCX fixture with two jobs extracted both jobs and source bullets. The two-job import
+then completed a deterministic mock pipeline with both employers present and zero validation errors.
+These are live extraction checks, not a new live-generation quality benchmark. Personal files were
+not sent in these checks. Windows CI must run on the pushed revision.
+
+Final local verification for this change: 139 tests passed on Linux; `git diff --check` passed.
+The synthetic mock evaluation CLI also completed. Windows CI is pending after push.

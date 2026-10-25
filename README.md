@@ -5,8 +5,7 @@ A single-user, evidence-grounded job application workbench for data engineering 
 The factual gate supports two modes. **Strict** mode requires exact supported source wording.
 **Live-reviewed** mode permits paraphrases only when a separate evidence auditor returns exact
 source quotes and wording/metric/technology/scope/date checks, and independent deterministic guards
-pass. A valid evidence ID or quote alone is insufficient. Model judgments remain fallible; factual
-confirmation is separate from final user approval. Mock reviewers cannot authorize paraphrases.
+pass. A valid evidence ID or quote alone is insufficient. Model judgments remain fallible; user-provided source facts are separate from final application approval. Mock reviewers cannot authorize paraphrases.
 
 ## Setup
 
@@ -38,10 +37,10 @@ in the Linux cloud environment. No credentials are needed in practice mode.
 ### Use the workbench
 
 Your experience is stored locally and reused on every run; it is not recreated for each job.
-On first use, import your private evidence backup in the sidebar, use the My experience forms,
-or load the clearly labeled synthetic example. Confirmed facts are saved to `local/career.json`;
-only confirmed records can generate claims. Role, evidence, tool, metric and source edits use
-forms. Saving an edited record requires factual confirmation again; otherwise it becomes uncertain.
+On first use, upload a DOCX/TXT resume in My experience, use its forms, import a private backup,
+or load the clearly labeled synthetic example. Your source facts are saved to `local/career.json`;
+User-entered and uploaded records can generate claims immediately. Role, evidence, tool and metric edits use
+forms. Saving records treats them as user-provided source data; no additional factual-confirmation step is required.
 Back up the evidence file privately. Historical runs keep their original snapshots.
 
 In Create application, paste a job description or load one public HTTPS posting link. Review
@@ -50,7 +49,7 @@ instead in those cases. The importer follows at most three redirects, limits pag
 local/private destinations, and does not crawl, log in or bypass site restrictions. Page content
 remains untrusted data. URL handling is tested with simulated responses; site access varies.
 
-The app maps requirements, asks optional gap questions, and saves explicitly confirmed factual
+The app maps requirements, asks optional gap questions, and saves user-provided factual
 answers to your reusable library. Training, portfolio and academic work retain their context.
 “No relevant experience” and practical preferences are saved separately, never promoted into
 experience. Unanswered gaps remain visible and do not prevent a truthful draft. Generation mode
@@ -92,7 +91,7 @@ confirmed evidence + approved profile -> provider -> structured packet
                                \-> SQLite snapshots, versions, findings, telemetry
 ```
 
-- `models.py`: employers, official titles/dates, projects, personal actions, ownership, technology usage, qualified metrics, sources, verification, approved wording and prohibited inferences. IDs must be stable and unique. Conflicting dates for the same employer/title are rejected. Unconfirmed evidence is ineligible.
+- `models.py`: employers, official titles/dates, projects, personal actions, ownership, technology usage, qualified metrics, sources, verification, approved wording and prohibited inferences. IDs must be stable and unique. Conflicting dates for the same employer/title are rejected. User-provided and previously confirmed evidence is eligible; legacy uncertain machine-extracted records remain excluded unless explicitly imported or saved by the user.
 - `pipeline.py`: framework-independent orchestration. Requirement extraction is a transparent line/heading baseline, with required/preferred/ambiguous labels and verbatim excerpts. Location and practical constraints require clarification; no sensitive personal characteristics are inferred. Retrieval is a replaceable protocol, currently tag and lexical overlap. “Direct” means all non-stopword tokens match available evidence text/tags; “transferable” means partial overlap, **not** a semantic certification. Inspect the map for multi-tool or nuanced requirements.
 - `providers.py`: provider protocol, deterministic mock, Anthropic and OpenAI Chat Completions adapters. Generator/reviewer settings are separate. Approved style instructions are loaded explicitly. Job descriptions, evidence, and reviewer messages remain data in prompts; generated facts still face a deterministic gate. The model reviewer cannot replace the factual auditor. Recruiter objections must reference a known claim and requirement; voice objections require a known claim.
 - `store.py`: SQLite run manifests, input snapshots, version events, rejected revision candidates, and content-addressed stage cache. Cache keys include provider/model, prompt version, settings and full stage payload. Manifests include hashes, schema/prompt/profile versions, model settings, stage latency/status, available usage/cost, revisions, stopping reason, validation, artifact paths and checksums. SQLite contains private content; stdout does not print snapshots.
@@ -102,7 +101,7 @@ Every generated revision candidate is persisted. The default revision limit is t
 
 ### Evidence authoring contract
 
-Only mark sources `user_confirmed` after inspecting the factual source statements. The app does not authenticate source documents or infer missing facts. Approved wording and confirmed factual statements are explicit support anchors; neither constitutes approval of a generated packet. Structured fields and source excerpts provide context, not independent proof. Preserve estimated/expected/realized qualifiers, titles, dates, familiarity versus production use, contribution versus ownership, and education status. Do not approve paraphrases implying leadership, database administration or a completed degree without that evidence. `prohibited_inferences` is available to model context and human review; arbitrary natural-language prohibitions are not a semantic rules engine. Strict checks catch deviations from supported source wording; live-reviewed mode additionally validates structured assessments and independent number/unit/qualifier/tool/scope guards. Neither authenticates source facts or proves entailment. The separate evidence reviewer can raise additional factual objections, which block approval.
+Direct entries and resume imports use `user_provided`; existing `user_confirmed` records remain supported. User input is authoritative for tailoring, not independently verified by this app. The app does not authenticate source documents or infer missing facts. Approved wording and confirmed factual statements are explicit support anchors; neither constitutes approval of a generated packet. Structured fields and source excerpts provide context, not independent proof. Preserve estimated/expected/realized qualifiers, titles, dates, familiarity versus production use, contribution versus ownership, and education status. Do not approve paraphrases implying leadership, database administration or a completed degree without that evidence. `prohibited_inferences` is available to model context and human review; arbitrary natural-language prohibitions are not a semantic rules engine. Strict checks catch deviations from supported source wording; live-reviewed mode additionally validates structured assessments and independent number/unit/qualifier/tool/scope guards. Neither authenticates source facts or proves entailment. The separate evidence reviewer can raise additional factual objections, which block approval.
 
 ## Live configuration
 
@@ -296,3 +295,51 @@ proof those jobs passed; inspect GitHub Actions before release. See
 If presentation edits introduce new review errors after a packet has passed, the pipeline restores
 that exact passing packet and stops. Both the rejected edit and restored version remain in the
 audit. Restoring a version does not mark it user-approved or remove unresolved presentation gaps.
+
+At the top of **Create application**, **Include a cover letter** controls which documents are
+created. Clear it for a resume-only run; the selection is saved with the run and honored by
+review, approval, and export. The CLI equivalent is `career run ... --resume-only`.
+Existing runs retain their original document selection.
+
+Job intake recognizes ordinary qualification/responsibility lines, numbered lists and Markdown
+headings. If no requirements are recognized, the UI explains that extraction is empty instead
+of showing a misleading zero-match summary. Coverage remains lexical and should be reviewed.
+
+Confirmed work history is retained independently of job-description keyword matching. Retrieval
+chooses relevant evidence within each employment scope; it cannot remove every job when a posting
+has unfamiliar wording. A resume missing a confirmed employment scope is marked incomplete and
+blocked from final approval/export. Uncertain evidence remains excluded. Old runs are preserved;
+create a new run to use the updated selection and document options.
+
+### Saved resume baseline
+
+**My experience → Employment history** is the source of resume job sections. The renderer always
+includes those jobs in reverse chronological order with saved dates and official or explicitly
+approved descriptive titles, even if the generated packet supplies no bullet for a job. Older
+imports with confirmed employment metadata on evidence are supported without migrating the file.
+Each run saves a versioned, hashed employment baseline alongside its evidence snapshot.
+
+Tailoring selects and rewrites supported bullets within that fixed history. Evidence shared across
+roles remains explicitly labeled as shared work under each referenced job, rather than silently claiming exclusive scope.
+If tailoring omits a job, an exact source bullet is restored before review with its evidence reference.
+A saved role without source bullets stops generation; empty job sections cannot be exported. Historical run snapshots remain unchanged when the current history is edited.
+
+
+### Import a resume, not a JSON file
+
+In **My experience**, upload a DOCX or UTF-8 TXT resume using **Load a resume as my history**,
+then select **Import resume**. OpenAI or Anthropic extracts the history into internal structured
+records. This requires a configured provider key and sends the uploaded resume text to that
+provider. The UI saves the original locally under `local/resume_sources/` and saves the structured
+history automatically. JSON import/export remains available as a backup option.
+
+Imported and manually entered facts are usable immediately as `user_provided` sources. No fact-by-fact
+confirmation checkbox is required. Checks compare extraction/output to the input: invented or changed
+source wording, mismatched job dates, wrong-role bullet placement and jobs without source bullets
+are rejected. Missing month/year dates must be supplied in the source rather than guessed.
+Existing history is merged without deleting saved records; conflicting dates require editing the
+saved role. PDF/OCR intake is not currently supported; export an editable DOCX or TXT first.
+
+CLI: `career import-resume --file resume.docx --provider openai --output local/career.json`.
+Final application approval remains separate: it acknowledges review of generated output, not the
+truth of each input record.

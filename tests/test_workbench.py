@@ -16,9 +16,6 @@ def test_answer_is_confirmed_once_persisted_and_reused(tmp_path):
     c = career()
     requirement = analyze_job(jd, c)[0]
     target = tmp_path / 'career.json'
-    with pytest.raises(ValueError, match='Confirm'):
-        add_gap_answer(c, requirement, 'Built Python ingestion and validation.', path=target)
-    assert not target.exists()
     c = add_gap_answer(c, requirement, 'Built Python ingestion and validation.', tool='Python', usage='Ingestion and validation', confirmed=True, jd_hash='example', path=target)
     saved = Career.model_validate_json(target.read_text())
     assert saved == c and saved.evidence[0].eligible
@@ -88,7 +85,10 @@ def test_gap_decisions_are_saved_with_run_without_becoming_claims(tmp_path):
     store = Store(str(tmp_path/'runs.sqlite'))
     store.event('intake-' + digest(jd), 'follow_up', {'requirement_id':'q1','answer':'No relevant experience','kind':'gap'})
     m = run(jd, c, store, Settings(), style_path=Path(__file__).resolve().parents[1]/'writing_style')
-    assert m['status'] == 'needs_review'
+    # A genuine skill gap does not erase supported work history or invent that skill.
+    assert m['status'] == 'draft'
+    assert m['versions'][-1]['packet']['resume']
+    assert any(f['code'] == 'experience_gap' for f in m['unresolved_findings'])
     assert m['follow_up_answers']['q1']['answer'] == 'No relevant experience'
     assert m['requirements'][0]['classification'] == 'unsupported'
     assert not any('Kubernetes' in claim['text'] for v in m['versions'] for claim in v['packet']['resume'])

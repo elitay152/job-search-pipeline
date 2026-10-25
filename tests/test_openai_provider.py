@@ -177,3 +177,14 @@ def test_review_schema_rejects_employment_and_passage_ids_as_evidence():
     finding['claim_id'] = 'fact-1'
     with pytest.raises(SchemaError):
         validate(result, schema)
+
+
+def test_openai_resume_only_schema_disallows_cover_letter(monkeypatch):
+    def handler(request):
+        body=json.loads(request.content)
+        schema=body['tools'][0]['function']['parameters']
+        assert schema['properties']['cover_letter']['maxItems']==0
+        return httpx.Response(200,json=response({'resume':[{'id':'r1','text':'Built synthetic pipelines.', 'evidence_ids':['e1']}], 'cover_letter':[], 'skills':[]}))
+    install_transport(monkeypatch,handler)
+    result=OpenAIProvider().complete('generate',{'document_plan':{'include_cover_letter':False}},'gpt-4.1')
+    assert not result['result']['cover_letter']
