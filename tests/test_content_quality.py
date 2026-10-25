@@ -69,7 +69,7 @@ def test_normal_scientific_tool_names_and_complete_paragraphs_not_flagged():
 def test_quality_warnings_survive_review_and_do_not_waive_factual_gate(monkeypatch,tmp_path):
     c,p=weak_case()
     def complete(self,task,payload,model,max_tokens=6000):
-        result={'findings':[], 'reviewed_claim_ids':[claim.id for claim in p.resume+p.cover_letter], 'assessments':[]}
+        result={'findings':[], 'reviewed_claim_ids':[claim['id'] for claim in payload['packet']['resume']+payload['packet']['cover_letter']], 'assessments':[]}
         return {'result':result,'input_tokens':10,'output_tokens':10}
     monkeypatch.setattr(OpenAIProvider,'complete',complete)
     store=Store(str(tmp_path/'runs.sqlite'))

@@ -188,3 +188,21 @@ def test_openai_resume_only_schema_disallows_cover_letter(monkeypatch):
     install_transport(monkeypatch,handler)
     result=OpenAIProvider().complete('generate',{'document_plan':{'include_cover_letter':False}},'gpt-4.1')
     assert not result['result']['cover_letter']
+
+
+def test_gateway_counts_actual_requests_not_unused_retry_allowance(monkeypatch, tmp_path):
+    from career_pipeline.providers import Gateway
+    calls = []
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json=response({'resume': [], 'cover_letter': [], 'skills': []}))
+    install_transport(monkeypatch, handler)
+    with Store(str(tmp_path/'budget.sqlite')) as store:
+        gateway = Gateway(store, Settings(generator='openai', max_calls=3))
+        for i in range(3):
+            gateway.call('generate', {'synthetic_request': i})
+        assert gateway.calls == len(calls) == 3
+        assert gateway.tokens == 150
+        with pytest.raises(ValueError, match='budget exhausted'):
+            gateway.call('generate', {'synthetic_request': 4})
+        assert len(calls) == 3

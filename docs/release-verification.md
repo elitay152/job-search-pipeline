@@ -132,3 +132,28 @@ cover punctuation, multiline headers, invalid line IDs, correction bounds and pr
 
 Final local checks: 142 tests passed on Linux, and `git diff --check` passed. Windows CI is pending
 on the pushed branch. The corrected private backup was pushed separately from application code.
+
+## Bounded evidence-review responses
+
+Live evidence review now uses groups of at most four claims (smaller with a lower per-call
+output cap). A truncated group splits into two, down to a single claim; incomplete results
+never authorize export. Each group retains its cited source records and undergoes the existing
+review contract checks. Combined receipts must cover the complete resume and letter. Recruiter
+and voice editors still see the whole document. Batch statuses and accepted responses are saved
+in the review history; all calls remain subject to the configured budgets and stage cache.
+Successful provider calls consume actual request counts, not their unused transient-retry allowance.
+Unknown failed-attempt token usage is still conservatively reserved.
+
+The evidence auditor receives the active factual policy explicitly and does not receive professional
+writing-style instructions. In model-reviewed mode, semantic equivalence is permitted without
+weakening metric, scope, technology, source-quote or date checks. An initial live paraphrase check
+exposed over-rejection of equivalent verbs; the final prompt separates this from strict copying.
+
+Validation: 149 tests passed on Linux, including synthetic truncation/splitting, complete receipts,
+single-claim failure, approval blocking, persistent negative findings and call-budget exhaustion.
+A live GPT-4.1 review of a seeded synthetic packet (12 resume claims and three letter claims)
+completed four evidence batches plus recruiter/voice reviews. The final paraphrase check returned
+15 assessments, zero factual validation errors, and draft status in 13.3 seconds, using 24,325
+reported tokens. This tested live review, not new document generation, a human writing-quality
+benchmark, Windows execution, or a new live Anthropic run. No personal career data was sent in
+these checks. The earlier practical-constraint follow-up removal is included in this branch.

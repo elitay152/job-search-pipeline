@@ -318,7 +318,7 @@ with apply_tab:
                 store.event('readiness', 'synthetic_provider_test', result)
                 (st.success if result['status'] == 'passed' else st.error)(label.title() + ': ' + result['message'])
         plan = budget_plan(Settings(max_revisions=cycles, max_calls=call_budget, token_budget=token_budget, max_output_tokens=output_limit))
-        st.write(f"Up to {plan['normal_calls']} stage calls across the selected revision cycles; up to {plan['with_contract_corrections']} with reviewer corrections, before transient retries. Early stopping and cache hits may reduce this.")
+        st.write(f"With one evidence batch per review: {plan['normal_calls']} stage calls across the selected revision cycles, or {plan['with_contract_corrections']} with reviewer corrections. Longer documents use additional small evidence-review batches; truncated batches split automatically. All requests remain subject to your call and token budgets. Early stopping and cache hits reduce usage.")
         st.caption('Before each request, the pipeline reserves a conservative input-byte estimate plus the output limit and affordable retry capacity. Successful requests settle to reported token usage. A total budget can stop a run even when earlier calls succeeded; it is never raised automatically.')
     problems = [message for p in set((generator, reviewer)) if (message := configuration_problem(p))]
     missing_jobs = missing_source_jobs(career)

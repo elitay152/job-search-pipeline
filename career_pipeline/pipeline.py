@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Protocol
 from .models import Career, Requirement, Packet, Finding, Settings
-from .providers import Gateway, PROMPT_VERSION
+from .providers import Gateway, PROMPT_VERSION, IncompleteResponse
 from .store import Store, digest, now
 from .review import audit, reviews, document_plan, group_key
 from .grounding import accepted_assessments
@@ -139,6 +139,48 @@ def validate_review_contract(raw, role, packet, requirements, career, factual_mo
     return parsed, receipt
 
 
+def batched_evidence_review(packet, payload, review_one, output_limit, records):
+    """Bound response size without dropping claims; split truncated groups down to one.
+
+    All requests still pass through Gateway budgets and the per-batch review contract.
+    Recruiter/voice reviews retain the complete document for cross-passage judgments.
+    """
+    claims = packet.resume + packet.cover_letter
+    group_size = max(1, min(4, output_limit // 1400))
+    combined = {'findings': [], 'reviewed_claim_ids': [], 'assessments': []}
+
+    def process(group):
+        ids = {c.id for c in group}
+        subset = Packet(resume=[c for c in packet.resume if c.id in ids],
+            cover_letter=[c for c in packet.cover_letter if c.id in ids], skills=packet.skills)
+        linked = {i for c in group for i in c.evidence_ids} | set(packet.skills)
+        career = dict(payload['career'], evidence=[e for e in payload['career']['evidence'] if e['id'] in linked])
+        request = dict(payload, packet=subset.model_dump(), career=career, style='',
+            review_scope='Evidence review batch: inspect only the supplied claims. Other claims are reviewed separately; do not flag missing sections.')
+        record = {'claim_ids': [c.id for c in group], 'status': 'running'}
+        records.append(record)
+        try:
+            raw, _, _ = review_one(subset, request)
+        except IncompleteResponse:
+            record['status'] = 'incomplete'
+            if len(group) <= 1:
+                raise
+            middle = len(group) // 2
+            process(group[:middle])
+            process(group[middle:])
+            return
+        except Exception:
+            record['status'] = 'failed'
+            raise
+        record['status'] = 'passed'
+        for key in combined:
+            combined[key].extend(raw.get(key, []))
+
+    for start in range(0, max(1, len(claims)), group_size):
+        process(claims[start:start + group_size])
+    return combined
+
+
 def run(jd, career, store=None, settings=None, style_path='writing_style', strategy='C', seed_packet=None, application=None):
     store = store or Store()
     settings = settings or Settings()
@@ -241,27 +283,35 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                         career=career.model_dump(mode='json'))
                     role_payload.pop('evidence', None)  # The full career already contains these records.
                     try:
-                        def review_with_correction():
+                        def review_one(request_packet, request_payload):
                             attempts = version['reviews'][role].setdefault('attempts', [])
-                            request = role_payload
+                            request = request_payload
                             for attempt in range(2):
                                 raw = gateway.call('review', request)
                                 try:
-                                    parsed, receipt = validate_review_contract(raw, role, packet, requirements, career, settings.factual_mode)
+                                    parsed, receipt = validate_review_contract(raw, role, request_packet, requirements, career, settings.factual_mode)
                                 except ValueError as exc:
-                                    attempts.append({'status': 'rejected', 'response': raw, 'error': str(exc)})
+                                    attempts.append({'status': 'rejected', 'response': raw, 'error': str(exc), 'claim_ids': [c.id for c in request_packet.resume + request_packet.cover_letter]})
                                     store.save(manifest)
                                     if attempt or settings.reviewer == 'mock':
                                         raise
-                                    request = dict(role_payload, contract_correction={
+                                    request = dict(request_payload, contract_correction={
                                         'error': str(exc),
-                                        'claim_ids': [c.id for c in packet.resume + packet.cover_letter],
+                                        'claim_ids': [c.id for c in request_packet.resume + request_packet.cover_letter],
                                         'evidence_ids': [e.id for e in career.evidence],
                                         'requirement_ids': [q.id for q in requirements],
                                         'instruction': 'Return a complete corrected review for your assigned role. This corrects the response contract, never relaxes factual standards.'})
                                 else:
                                     attempts.append({'status': 'accepted', 'response': raw})
+                                    store.save(manifest)
                                     return raw, parsed, receipt
+                        def review_with_correction():
+                            if role == 'evidence' and settings.reviewer != 'mock':
+                                combined = batched_evidence_review(packet, role_payload, review_one,
+                                    settings.max_output_tokens, version['reviews'][role].setdefault('batches', []))
+                                parsed, receipt = validate_review_contract(combined, role, packet, requirements, career, settings.factual_mode)
+                                return combined, parsed, receipt
+                            return review_one(packet, role_payload)
                         raw, parsed, receipt = stage('review_' + role, review_with_correction)
                         if role == 'evidence' and settings.factual_mode == 'model_reviewed':
                             version['support_assessments'] = raw.get('assessments', [])
