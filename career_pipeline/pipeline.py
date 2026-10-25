@@ -349,11 +349,9 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
 def discovery_questions(requirements):
     questions = []
     for q in requirements:
-        if q.classification == 'direct':
+        if q.kind == 'constraint' or q.classification == 'direct':
             continue
-        prompt = ('Does this practical constraint work for you? Leave it unresolved if unknown.'
-                  if q.kind == 'constraint' else
-                  'Is there relevant experience not yet captured? None is a valid answer. '
+        prompt = ('Is there relevant experience not yet captured? None is a valid answer. '
                   'If yes, describe where/when, what you personally did, actual tool use, '
                   'production versus portfolio setting, ownership, and any supported outcome. '
                   'For metrics, include units, measurement source, baseline, window and uncertainty.')

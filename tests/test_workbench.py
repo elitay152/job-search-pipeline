@@ -92,3 +92,18 @@ def test_gap_decisions_are_saved_with_run_without_becoming_claims(tmp_path):
     assert m['follow_up_answers']['q1']['answer'] == 'No relevant experience'
     assert m['requirements'][0]['classification'] == 'unsupported'
     assert not any('Kubernetes' in claim['text'] for v in m['versions'] for claim in v['packet']['resume'])
+
+
+def test_practical_constraints_never_prompt_or_create_resume_gaps():
+    from career_pipeline.pipeline import discovery_questions
+    from career_pipeline.review import reviews
+    from career_pipeline.workbench import requirement_details
+    c = career()
+    requirements = analyze_job('Location: hybrid, two days onsite.\nRequired: Kubernetes experience.', c)
+    practical = next(q for q in requirements if q.kind == 'constraint')
+    questions = discovery_questions(requirements)
+    assert questions and all(q['requirement_id'] != practical.id for q in questions)
+    findings = reviews(Packet(resume=[], cover_letter=[]), requirements, c)
+    assert all(f.requirement_id != practical.id for f in findings)
+    assert fit_report(requirements)['clarifications'] == 0
+    assert 'excluded from resume tailoring' in requirement_details([practical])[0]['explanation']

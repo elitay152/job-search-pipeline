@@ -90,6 +90,8 @@ def reviews(packet, requirements, career, plan=None, grounded_claims=None):
     claims = packet.resume + packet.cover_letter
     used = {i for c in claims for i in c.evidence_ids} | set(packet.skills)
     for q in requirements:
+        if q.kind == 'constraint':
+            continue
         if q.classification in ('unsupported', 'needs_clarification'):
             findings.append(Finding(role='recruiter', requirement_id=q.id, severity='gap',
                 code='experience_gap', message=f'{q.classification}: {q.text}'))

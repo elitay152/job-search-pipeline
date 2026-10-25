@@ -66,7 +66,7 @@ def requirement_details(requirements, packet=None, answers=None):
     answers = answers or {}
     return [dict(q.model_dump(),
         passage_ids=[c.id for c in passages if set(c.evidence_ids).intersection(q.evidence_ids)],
-        explanation=('Practical constraint; confirm separately from career evidence.' if q.kind == 'constraint'
+        explanation=('Posting logistics only; excluded from resume tailoring and follow-up questions.' if q.kind == 'constraint'
             else 'No supporting evidence selected; clarify or retain as a gap.' if not q.evidence_ids
             else 'Lexical/tag matching selected these sources; inspect wording and context before accepting coverage.'),
         follow_up=answers.get(q.id)) for q in requirements]
