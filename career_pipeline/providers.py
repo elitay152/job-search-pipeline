@@ -5,7 +5,7 @@ from typing import Protocol
 from pydantic import BaseModel
 from .models import Packet, Finding, Career, Requirement, ClaimAssessment
 from .store import digest
-from .resume_intake import ResumeIntake, INTAKE_INSTRUCTIONS
+from .resume_intake import IndexedResumeIntake, INTAKE_INSTRUCTIONS
 
 PROMPT_VERSION = 'prompt-v14'
 
@@ -84,7 +84,7 @@ class AnthropicProvider:
             raise RuntimeError('ANTHROPIC_API_KEY is required in secure environment settings')
         client = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'], max_retries=0)
         instructions = INTAKE_INSTRUCTIONS if task == 'intake' else ROLE_RULES[payload['role']] if task == 'review' else GENERATION
-        schema = ResumeIntake.model_json_schema() if task == 'intake' else ReviewResponse.model_json_schema() if task == 'review' else Packet.model_json_schema()
+        schema = IndexedResumeIntake.model_json_schema() if task == 'intake' else ReviewResponse.model_json_schema() if task == 'review' else Packet.model_json_schema()
         if task == 'review':
             constrain_review_schema(schema, payload)
         elif (payload.get('document_plan') or {}).get('include_cover_letter') is False:
@@ -99,7 +99,7 @@ class AnthropicProvider:
                         'data': {k: v for k, v in payload.items() if k != 'style'}})}])
                 block = next(b for b in response.content if b.type == 'tool_use' and b.name == 'return_result')
                 result = block.input
-                validator = ResumeIntake if task == 'intake' else ReviewResponse if task == 'review' else Packet
+                validator = IndexedResumeIntake if task == 'intake' else ReviewResponse if task == 'review' else Packet
                 result = validator.model_validate(result).model_dump()
                 return {'result': result, 'input_tokens': response.usage.input_tokens,
                         'output_tokens': response.usage.output_tokens}
@@ -127,7 +127,7 @@ class Gateway:
                                       input_tokens=0, output_tokens=0, estimated_cost=0))
             return json.loads(row[0])
         attempts = 1 if provider == 'mock' else 3
-        schema = ResumeIntake.model_json_schema() if task == 'intake' else ReviewResponse.model_json_schema() if task == 'review' else Packet.model_json_schema()
+        schema = IndexedResumeIntake.model_json_schema() if task == 'intake' else ReviewResponse.model_json_schema() if task == 'review' else Packet.model_json_schema()
         # UTF-8 bytes plus output cap are conservative token bounds. Reserve for retries;
         # settle successful calls to reported actual usage rather than accumulating unused bounds.
         size = len(json.dumps(payload).encode()) + len(json.dumps(schema).encode()) + len(RULES.encode()) + len(GENERATION.encode()) + sum(len(s.encode()) for s in ROLE_RULES.values()) + 512
@@ -222,7 +222,7 @@ class OpenAIProvider:
         import openai
         client = openai.OpenAI(api_key=openai_key(), base_url='https://api.openai.com/v1', max_retries=0)
         instructions = INTAKE_INSTRUCTIONS if task == 'intake' else ROLE_RULES[payload['role']] if task == 'review' else GENERATION
-        validator = ResumeIntake if task == 'intake' else ReviewResponse if task == 'review' else Packet
+        validator = IndexedResumeIntake if task == 'intake' else ReviewResponse if task == 'review' else Packet
         schema = strict_tool_schema(validator.model_json_schema())
         if task == 'review':
             constrain_review_schema(schema, payload)

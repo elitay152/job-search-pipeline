@@ -110,3 +110,25 @@ not sent in these checks. Windows CI must run on the pushed revision.
 
 Final local verification for this change: 139 tests passed on Linux; `git diff --check` passed.
 The synthetic mock evaluation CLI also completed. Windows CI is pending after push.
+
+## Intake error correction
+
+The saved private profile had four older employment records without linked source accomplishments.
+Six original bullets were recovered from the previously uploaded master resume and added only to
+the private evidence backup; existing records, titles and dates were preserved. Every saved job in
+that repaired backup now has source bullets. No personal data was added to this public repository.
+The UI now identifies missing jobs before generation rather than showing an unspecified blocker.
+
+Resume intake now asks the model to select numbered source lines instead of retyping paragraphs.
+Source text is reconstructed locally, preserving punctuation and qualifiers. A single bounded
+correction handles invalid selections. Technical projects and summaries have explicit extraction
+fields, avoiding false omission failures for project bullets. Source wording, role placement and
+unsupported-date guards remain in place.
+
+Live OpenAI validation against the previously uploaded master DOCX completed with seven jobs,
+26 employment statements and four project statements. This tested extraction; it did not overwrite
+existing corrected career facts or claim a new final application was generated. Synthetic tests
+cover punctuation, multiline headers, invalid line IDs, correction bounds and project preservation.
+
+Final local checks: 142 tests passed on Linux, and `git diff --check` passed. Windows CI is pending
+on the pushed branch. The corrected private backup was pushed separately from application code.
