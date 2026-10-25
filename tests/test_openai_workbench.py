@@ -5,7 +5,7 @@ import httpx
 from docx import Document
 from streamlit.testing.v1 import AppTest
 from career_pipeline.models import Career
-from test_ui import workspace, field, ROOT
+from test_ui import workspace, field, ROOT, UI_TEST_TIMEOUT
 from test_openai_provider import install_transport, response
 
 
@@ -58,10 +58,10 @@ def test_openai_revision_truncation_approval_and_downloads(workspace, monkeypatc
                         technology_consistent=True, scope_consistent=True, dates_titles_consistent=True))
         return httpx.Response(200, json=response(result))
     install_transport(monkeypatch, handler)
-    app = AppTest.from_file(str(ROOT/'career_pipeline/ui.py')).run()
+    app = AppTest.from_file(str(ROOT/'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
     field(app, 'radio', 'Generation mode').set_value('Use OpenAI').run()
     field(app, 'text_area', 'Paste the job description').set_value('Required: Python delivery and peer training. Git version control.').run()
-    field(app, 'button', 'Create my draft').click().run(timeout=20)
+    field(app, 'button', 'Create my draft').click().run()
     assert not app.exception
     assert truncated
     assert calls[:2] == [('generate',None), ('revise',None)]  # Repair before paid reviews.
@@ -81,7 +81,7 @@ def test_openai_revision_truncation_approval_and_downloads(workspace, monkeypatc
         assert 'Implemented CI/CD' not in text and 'on optimization' not in text
         assert 'Python' in text
     total = len(calls)
-    fresh = AppTest.from_file(str(ROOT/'career_pipeline/ui.py')).run()
+    fresh = AppTest.from_file(str(ROOT/'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
     assert not fresh.exception
     assert (workspace/'local/career.json').exists()
     assert len(calls) == total  # Restarting the UI does not regenerate or charge again.
