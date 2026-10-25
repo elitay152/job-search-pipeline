@@ -250,7 +250,7 @@ with apply_tab:
             cols[1].metric('Transferable evidence', summary['transferable'])
             cols[2].metric('Gaps to review', summary['gaps'] + summary['clarifications'])
             st.caption('Evidence coverage uses transparent lexical matching, not an ATS score or a prediction of hiring outcomes.')
-        gaps = [q for q in requirements if q.classification in ('unsupported', 'needs_clarification')]
+        gaps = [q for q in requirements if q.kind == 'skill' and q.classification in ('unsupported', 'needs_clarification')]
         job_hash = digest(jd)
         intake_id = 'intake-' + job_hash
         saved_answers = store.follow_up_answers(job_hash)
@@ -262,32 +262,25 @@ with apply_tab:
                 if q.id in saved_answers:
                     st.info('Saved response: ' + saved_answers[q.id]['answer'])
                 with st.form('followup_' + job_hash[:12] + q.id):
-                    if q.kind == 'constraint':
-                        answer = st.text_input('Does this practical requirement work for you?', placeholder='Confirm, describe a constraint, or leave unresolved')
-                        if st.form_submit_button('Save preference'):
-                            if answer.strip():
-                                store.event(intake_id, 'follow_up', {'requirement_id': q.id, 'answer': answer, 'kind': 'preference'})
-                                st.rerun()
-                    else:
-                        choice = st.radio('Do you have relevant experience?', ['Add experience', 'No relevant experience', 'Decide later'], key='choice_' + job_hash[:12] + q.id)
-                        answer = st.text_area('What did you personally do?', key='answer_' + job_hash[:12] + q.id,
-                            help='Include scope and actual results. Label estimates and training; do not turn shared work into sole ownership.')
-                        role_ids = st.multiselect('Where did you do this?', [j.id for j in career.employments],
-                            format_func=lambda ident: next(f'{j.employer} — {j.official_title}' for j in career.employments if j.id == ident), key='roles_' + job_hash[:12] + q.id)
-                        tool = st.text_input('Tool or technology (optional)', key='tool_' + job_hash[:12] + q.id)
-                        usage = st.text_input('How you used it', key='usage_' + job_hash[:12] + q.id)
-                        context = st.selectbox('Experience context', ['professional', 'portfolio', 'academic', 'training'], key='context_' + job_hash[:12] + q.id)
-                        ownership = st.selectbox('Scope of involvement', ['contributed', 'owned', 'familiarity'], key='ownership_' + job_hash[:12] + q.id)
-                        if st.form_submit_button('Save answer'):
-                            try:
-                                if choice == 'Add experience':
-                                    updated = add_gap_answer(career, q, answer, role_ids=role_ids, tool=tool, usage=usage,
-                                        context=context, ownership=ownership, confirmed=True, jd_hash=job_hash)
-                                    st.session_state.career = updated.model_dump(mode='json')
-                                store.event(intake_id, 'follow_up', {'requirement_id': q.id, 'answer': answer if choice == 'Add experience' else choice, 'kind': 'evidence' if choice == 'Add experience' else 'gap'})
-                                st.rerun()
-                            except ValueError as exc:
-                                validation_message(exc)
+                    choice = st.radio('Do you have relevant experience?', ['Add experience', 'No relevant experience', 'Decide later'], key='choice_' + job_hash[:12] + q.id)
+                    answer = st.text_area('What did you personally do?', key='answer_' + job_hash[:12] + q.id,
+                        help='Include scope and actual results. Label estimates and training; do not turn shared work into sole ownership.')
+                    role_ids = st.multiselect('Where did you do this?', [j.id for j in career.employments],
+                        format_func=lambda ident: next(f'{j.employer} — {j.official_title}' for j in career.employments if j.id == ident), key='roles_' + job_hash[:12] + q.id)
+                    tool = st.text_input('Tool or technology (optional)', key='tool_' + job_hash[:12] + q.id)
+                    usage = st.text_input('How you used it', key='usage_' + job_hash[:12] + q.id)
+                    context = st.selectbox('Experience context', ['professional', 'portfolio', 'academic', 'training'], key='context_' + job_hash[:12] + q.id)
+                    ownership = st.selectbox('Scope of involvement', ['contributed', 'owned', 'familiarity'], key='ownership_' + job_hash[:12] + q.id)
+                    if st.form_submit_button('Save answer'):
+                        try:
+                            if choice == 'Add experience':
+                                updated = add_gap_answer(career, q, answer, role_ids=role_ids, tool=tool, usage=usage,
+                                    context=context, ownership=ownership, confirmed=True, jd_hash=job_hash)
+                                st.session_state.career = updated.model_dump(mode='json')
+                            store.event(intake_id, 'follow_up', {'requirement_id': q.id, 'answer': answer if choice == 'Add experience' else choice, 'kind': 'evidence' if choice == 'Add experience' else 'gap'})
+                            st.rerun()
+                        except ValueError as exc:
+                            validation_message(exc)
 
     st.subheader('2. Choose how to create your draft')
     mode = st.radio('Generation mode', ['Practice with mock models', 'Use OpenAI', 'Use Anthropic'], horizontal=True,
@@ -415,6 +408,8 @@ with review_tab:
                 labels = {'direct': 'Direct evidence', 'transferable': 'Transferable experience', 'unsupported': 'Experience gap', 'needs_clarification': 'Needs clarification'}
                 index = {e.id: e for e in snapshot.evidence}
                 for q in m.get('requirements', []):
+                    if q.get('kind') == 'constraint':
+                        continue
                     with st.expander(f"{labels[q['classification']]} · {q['text']}"):
                         st.caption(q['priority'].title())
                         st.write(q['excerpt'])
@@ -423,7 +418,10 @@ with review_tab:
                                 st.write('**' + index[ident].project + '**')
                                 for text in index[ident].supported_wording:
                                     st.write(text)
+                practical_ids = {q['id'] for q in m.get('requirements', []) if q.get('kind') == 'constraint'}
                 for question in m.get('discovery_questions', []):
+                    if question['requirement_id'] in practical_ids:
+                        continue
                     saved = m.get('follow_up_answers', {}).get(question['requirement_id'])
                     st.info(question['excerpt'] + '\n\n' + ('Your saved answer: ' + saved['answer'] if saved else question['prompt']))
             with st.expander('Evidence behind each passage'):

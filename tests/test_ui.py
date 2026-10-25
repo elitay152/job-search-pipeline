@@ -173,3 +173,15 @@ def test_resume_upload_saves_history_without_confirmation_step(workspace, monkey
     assert saved.evidence and all(e.eligible for e in saved.evidence)
     assert list((workspace/'local/resume_sources').glob('*.docx'))
     assert not any('confirm this' in c.label.lower() or 'confirm they' in c.label.lower() for c in app.checkbox)
+
+
+def test_practical_constraints_do_not_ask_for_preferences(workspace):
+    app = AppTest.from_file(str(ROOT / 'career_pipeline/ui.py')).run()
+    field(app, 'button', 'Load synthetic example').click().run()
+    field(app, 'text_area', 'Paste the job description').set_value(
+        'Location: hybrid, two days onsite.\nRequired: Kubernetes experience.'
+    ).run()
+    assert not app.exception
+    assert not any('practical requirement' in e.label for e in app.text_input)
+    assert not any(e.label == 'Save preference' for e in app.button)
+    assert any(e.label == 'Do you have relevant experience?' for e in app.radio)
