@@ -320,6 +320,8 @@ with apply_tab:
         plan = budget_plan(Settings(max_revisions=cycles, max_calls=call_budget, token_budget=token_budget, max_output_tokens=output_limit))
         st.write(f"With one evidence batch per review: {plan['normal_calls']} stage calls across the selected revision cycles, or {plan['with_contract_corrections']} with reviewer corrections. Longer documents use additional small evidence-review batches; truncated batches split automatically. All requests remain subject to your call and token budgets. Early stopping and cache hits reduce usage.")
         st.caption('Before each request, the pipeline reserves an input-token estimate with a safety margin, the output limit and affordable retry capacity. OpenAI uses its tokenizer when available; other models or unavailable tokenizer assets use a conservative byte estimate. Successful requests settle to reported token usage. A total budget can stop a run even when earlier calls succeeded; it is never raised automatically.')
+    if generator != 'mock' or reviewer != 'mock':
+        st.caption(f'Generator: {generator_model} · Reviewer: {reviewer_model}. Per-application limits: {call_budget} requests, {token_budget:,} tokens, {cycles} revision cycles. These are usage limits, not a dollar quote. Change them in Writing style & advanced settings.')
     problems = [message for p in set((generator, reviewer)) if (message := configuration_problem(p))]
     missing_jobs = missing_source_jobs(career)
     if missing_jobs:

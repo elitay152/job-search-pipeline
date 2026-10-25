@@ -204,3 +204,28 @@ and do not download tokenizer assets. Tokenizer and regex dependency metadata su
 Windows execution, live Anthropic calls, browser file-save behavior on the user's machine, and Word/
 PDF visual pagination were not verified here. LibreOffice is unavailable. Live testing consumed API
 credits; exact charges are unavailable because pricing was not configured in the run settings.
+
+### Follow-up without paid requests (2026-10-25)
+
+The remaining saved draft was replayed against local checks. All three saved versions now
+flag CI/CD authorship inferred from deployment use, and training topics inferred from unrelated
+optimization/deployment work. These checks run before model review and during assessment validation;
+rewriting the statements does not waive source support. Generation instructions also distinguish
+these scopes and request concise bullets and connected cover-letter paragraphs.
+
+A new Streamlit acceptance test uses the actual OpenAI SDK with a synthetic HTTP transport. It
+exercises Create my draft, correction of unsupported initial claims, truncation and batch splitting,
+all three review roles, draft preparation, explicit approval, and final resume/letter DOCX output.
+Both final documents contain the intended corrected text and no DRAFT label or evidence IDs. A
+fresh UI session keeps saved history without another provider request. This verifies application
+behavior with simulated responses; it does not measure a live model's writing quality.
+
+The suite blocks real HTTPX transports and tokenizer downloads, so an accidentally unmocked model
+call fails locally rather than charging the account. Local result: **177 passed**, Linux;
+`git diff --check` passed. No live provider requests were made in this follow-up. Model names and
+per-application request/token/revision limits are visible beside the draft action. Those limits
+are not a dollar estimate or a global account spending cap.
+
+The earlier live acceptance limitation still applies. Windows execution and visual Word/PDF
+pagination remain unverified. Changes are prepared for merging; no new personal packet has been
+approved and the old draft artifacts remain explicitly unapproved.

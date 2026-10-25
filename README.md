@@ -363,3 +363,9 @@ saved role. PDF/OCR intake is not currently supported; export an editable DOCX o
 CLI: `career import-resume --file resume.docx --provider openai --output local/career.json`.
 Final application approval remains separate: it acknowledges review of generated output, not the
 truth of each input record.
+
+Offline regression checks run with real HTTP transports blocked: `python -m pytest -q` cannot
+fall through to a paid OpenAI or Anthropic call. The OpenAI workbench acceptance test uses synthetic
+HTTP responses to exercise revision, truncated-review recovery, approval, and both DOCX downloads.
+This checks application behavior, not live writing quality. See
+[release verification](docs/release-verification.md) for the current live-test limitations.

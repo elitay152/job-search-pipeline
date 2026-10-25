@@ -46,10 +46,49 @@ def source_text(e):
                       ' '.join(t.name + ' ' + t.usage for t in e.technologies)])
 
 
+
+def delivery_scope_objections(text, linked):
+    """Check two common scope upgrades without treating tool co-occurrence as support.
+
+    A deployment through CI/CD does not establish workflow authorship. A training
+    topic must occur in a source training statement, not elsewhere in the project.
+    These deliberately narrow checks complement the semantic review.
+    """
+    source = '\n'.join(source_text(e) for e in linked).lower()
+    low = text.lower()
+    issues = []
+    authoring = (r'\b(?:implement(?:ed|ing)?|build(?:ing)?|built|creat(?:ed|ing)|'
+                 r'design(?:ed|ing)?|author(?:ed|ing)?|develop(?:ed|ing)?)\b'
+                 r'[^.;\n]{0,65}\b(?:ci/cd|ci-cd|continuous integration|github actions)'
+                 r'(?:\s+(?:pipelines?|workflows?))?')
+    def asserts_authorship(value):
+        return any(not re.search(r'\b(?:through|via|using|with)\b', match[0])
+                   for match in re.finditer(authoring, value))
+    if asserts_authorship(low) and not asserts_authorship(source):
+        issues.append('deployment use upgraded to CI/CD authorship')
+    # Restrict the check to explicit peer/colleague training and explicit topics.
+    training = (r'\b(?:train(?:ed|ing)?|taught|teach(?:ing)?)\b'
+                r'[^.;\n]{0,60}\b(?:colleagues?|peers?|coworkers?|team members?)\b'
+                r'[^.;\n]{0,15}\b(?:on|in|about)\s+([^.;\n]+)')
+    topic_groups = {
+        'deployment': r'\bdeploy\w*\b',
+        'optimization': r'\boptimi[sz]\w*\b',
+        'security': r'\bsecur\w*\b',
+        **{tool: r'(?<![a-z0-9])' + re.escape(tool) + r'(?![a-z0-9])' for tool in TOOLS},
+    }
+    source_topics = ' '.join(re.findall(training, source) +
+        re.findall(r'\bpeer training\s+(?:on|in|about)\s+([^.;\n]+)', source))
+    for topics in re.findall(training, low):
+        for label, pattern in topic_groups.items():
+            if re.search(pattern, topics) and not re.search(pattern, source_topics):
+                issues.append('unestablished peer-training topic: ' + label)
+    return issues
+
+
 def deterministic_objections(text, linked):
     source = '\n'.join(source_text(e) for e in linked)
     low, original = text.lower(), source.lower()
-    issues = []
+    issues = delivery_scope_objections(text, linked)
     if not numbers(text) <= numbers(source):
         issues.append('new or altered number')
     for tool in TOOLS:
