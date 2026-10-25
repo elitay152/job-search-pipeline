@@ -157,3 +157,50 @@ completed four evidence batches plus recruiter/voice reviews. The final paraphra
 reported tokens. This tested live review, not new document generation, a human writing-quality
 benchmark, Windows execution, or a new live Anthropic run. No personal career data was sent in
 these checks. The earlier practical-constraint follow-up removal is included in this branch.
+
+## Real-resume acceptance check — incomplete final live verification
+
+On 2026-10-25, testing used the user's uploaded master DOCX, previously corrected private career
+history, approved writing profile, and a real pasted job description. No personal documents or
+career facts are included in the public fixtures or this report.
+
+The actual Streamlit upload control saved all seven source jobs with bullets, and a fresh app
+session reloaded the history. Full live OpenAI runs were then exercised through Create my draft,
+Review & download, and Prepare documents. DOCX files were opened with python-docx and checked for
+source job headings, education, publications, draft labels, and absence of internal evidence IDs.
+Several earlier runs completed, but manual reading found errors not caught by the initial automated
+checks. Therefore those runs are not treated as final acceptance of the revised implementation.
+
+Issues found and addressed:
+- Excessive duplicated source context and input-byte token reservations exhausted otherwise usable
+  budgets. Shared context is now losslessly referenced; OpenAI token estimates use its tokenizer.
+- Reviewers retyped quotations incorrectly. They now select numbered literal source excerpts; the
+  backend resolves text and shared-source links without inventing quotes.
+- Unchanged user-supplied facts were unnecessarily re-questioned. Exact source comparisons and
+  model-reviewed paraphrases now have separate receipts. Unknown ownership is not a negation of
+  explicit source actions.
+- Shared employment accomplishments were printed twice; education/publication anchors could be
+  dropped or rewritten. Rendering now preserves the baseline and groups same-employer shared work.
+- A reduction became a usage level, and one uncertainty qualifier was applied to a different metric.
+  Metric meaning and number-specific qualifiers now have deterministic regression checks.
+- Revisions could introduce new errors into passed passages. Source-backed restoration is recorded;
+  a later budget stop can return a previously fully reviewed packet, never an unreviewed revision.
+- Unicode punctuation was repeatedly escaped through model input. Source text now uses Unicode JSON;
+  canonical education/publication text is restored from input before review. Invalid XML characters
+  still block approval and are visibly replaced only in labeled draft exports.
+- Known factual errors are repaired before paid reviews. A skipped-review receipt no longer crashes
+  the readable report.
+
+Latest live attempt: both DOCX download controls worked with no Streamlit exception, but the final
+review was interrupted by OpenAI HTTP 429 / `credit_balance_exhausted` (`insufficient_quota`).
+Further live calls were stopped. No personal packet was marked approved. The final code includes
+an additional tested guard that does not retry exhausted-credit responses. This final code has NOT
+completed a new full live run after that provider limit. The application is not declared fully ready
+on the strength of unit tests alone. The exact generated drafts and unresolved editorial findings
+are stored only in the user's private repository.
+
+Final local checks: 166 tests passed on Linux; `git diff --check` passed. Tests use synthetic data
+and do not download tokenizer assets. Tokenizer and regex dependency metadata support Python 3.11.
+Windows execution, live Anthropic calls, browser file-save behavior on the user's machine, and Word/
+PDF visual pagination were not verified here. LibreOffice is unavailable. Live testing consumed API
+credits; exact charges are unavailable because pricing was not configured in the run settings.

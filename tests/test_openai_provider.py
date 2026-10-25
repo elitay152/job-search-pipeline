@@ -52,7 +52,7 @@ def test_openai_generation_and_all_review_roles(monkeypatch):
         result=OpenAIProvider().complete('review',{'style':'APPROVED_STYLE','role':role},'gpt-4.1')
         assert result['input_tokens']==30 and result['output_tokens']==20
     assert len(calls)==4
-    assert 'adversarial evidence auditor' in calls[1]['messages'][0]['content']
+    assert 'evidence auditor checking' in calls[1]['messages'][0]['content']
     assert 'skeptical recruiter' in calls[2]['messages'][0]['content']
     assert 'voice editor' in calls[3]['messages'][0]['content']
 
@@ -116,7 +116,10 @@ def test_openai_routes_through_pipeline_and_approval_gate(monkeypatch,tmp_path):
         envelope=json.loads(body['messages'][1]['content'])
         payload=envelope['data'];payload['style']='synthetic approved guidance'
         called.append((envelope['task'],payload.get('role')))
-        result=MockProvider().complete(envelope['task'],payload,'synthetic-model')
+        if envelope['task'] == 'review' and payload['role'] == 'evidence':
+            result = {'findings': [], 'reviewed_claim_ids': [c['id'] for c in payload['packet']['resume'] + payload['packet']['cover_letter']]}
+        else:
+            result=MockProvider().complete(envelope['task'],payload,'synthetic-model')
         if envelope['task']=='review':result['assessments']=[]
         return httpx.Response(200,json=response(result))
     install_transport(monkeypatch,handler)
@@ -124,7 +127,8 @@ def test_openai_routes_through_pipeline_and_approval_gate(monkeypatch,tmp_path):
     store=Store(str(tmp_path/'openai.sqlite'))
     settings=Settings(generator='openai',reviewer='openai',factual_mode='model_reviewed')
     m=run(Path('fixtures/job.txt').read_text(),career,store,settings)
-    assert called==[('generate',None),('review','evidence'),('review','recruiter'),('review','voice')]
+    assert called==[('generate',None),('review','recruiter'),('review','voice')]
+    assert m['versions'][0]['reviews']['evidence']['deterministic_claim_ids']
     assert m['settings']['reviewer']=='openai' and not m['validation']
     assert all(t['provider']=='openai' for t in m['telemetry'])
     assert all(t['input_tokens']==30 and t['output_tokens']==20 for t in m['telemetry'])
@@ -148,11 +152,13 @@ def test_gateway_limits_retries_to_remaining_budget(monkeypatch,tmp_path):
         calls.append(request)
         return httpx.Response(500,json={'error':{'message':'synthetic failure','type':'server_error'}})
     install_transport(monkeypatch,handler)
-    gateway=Gateway(Store(str(tmp_path/'budget.sqlite')),Settings(generator='openai',token_budget=100000))
+    monkeypatch.setattr('career_pipeline.providers.input_token_reservation', lambda *args: 12000)
+    # A token-based reservation leaves room for only one attempt.
+    gateway=Gateway(Store(str(tmp_path/'budget.sqlite')),Settings(generator='openai',token_budget=21000))
     with pytest.raises(openai.APIStatusError):
         gateway.call('generate',{'style':'x'*50000})
     assert len(calls)==1
-    assert gateway.tokens<=100000
+    assert gateway.tokens<=21000
 
 
 def test_review_schema_rejects_employment_and_passage_ids_as_evidence():
@@ -206,3 +212,77 @@ def test_gateway_counts_actual_requests_not_unused_retry_allowance(monkeypatch, 
         with pytest.raises(ValueError, match='budget exhausted'):
             gateway.call('generate', {'synthetic_request': 4})
         assert len(calls) == 3
+
+
+def test_input_reservation_uses_tokenizer_and_safe_fallback(monkeypatch):
+    from career_pipeline.providers import input_token_reservation
+    class Encoding:
+        def encode(self, text, disallowed_special):
+            assert disallowed_special == ()
+            return [1] * 100
+    monkeypatch.setattr('career_pipeline.providers.model_encoding', lambda model: Encoding())
+    assert input_token_reservation('synthetic <|endoftext|>', 'openai', 'gpt-4.1') == 2163
+    monkeypatch.setattr('career_pipeline.providers.model_encoding', lambda model: None)
+    assert input_token_reservation('synthetic', 'openai', 'unknown') == len(b'synthetic') + 512
+
+
+def test_model_context_compaction_preserves_exact_source_fields_and_ids():
+    from career_pipeline.providers import compact_context
+    source = {'reference': 'synthetic', 'status':'user_provided',
+              'excerpt': 'Built Python ingestion and validated source identifiers. ' * 8}
+    payload = {'career': {'evidence': [
+        {'id':f'e{i}', 'sources':[source], 'confirmed_statements':[f'Statement {i}.'],
+         'prohibited_inferences':['Do not infer sole ownership or a quantified outcome.'] * 4}
+        for i in range(4)]}}
+    original = json.loads(json.dumps(payload))
+    compact = compact_context(payload)
+    assert payload == original
+    assert len(json.dumps(compact)) < len(json.dumps(payload))
+    for before, after in zip(payload['career']['evidence'], compact['career']['evidence']):
+        assert before['id'] == after['id']
+        assert before['confirmed_statements'] == after['confirmed_statements']
+        for field in ('sources','prohibited_inferences'):
+            assert compact['shared_contexts'][after[field]['shared_context']] == before[field]
+
+
+def test_evidence_quote_selection_reconstructs_original_text_and_rejects_wrong_source():
+    from career_pipeline.providers import evidence_quote_protocol, resolve_source_quotes
+    from career_pipeline.models import Evidence
+    text = 'Built Python ingestion; retained approximately 20 million records.'
+    first = Evidence(id='a', project='Synthetic', actions=[], ownership='contributed', technologies=[],
+                     confirmed_statements=[text], sources=[{'reference':'synthetic','status':'user_provided'}])
+    second = first.model_copy(update={'id':'b', 'confirmed_statements':['Documented SQL queries.']})
+    payload = {'role':'evidence','career':{'evidence':[first.model_dump(),second.model_dump()]}}
+    schema = ReviewResponse.model_json_schema()
+    wire, catalog = evidence_quote_protocol(payload, schema)
+    ident = next(key for key, value in catalog.items() if value['text'] == text)
+    assert schema['$defs']['SupportQuote']['required'] == ['evidence_id','source_quote_id']
+    assert 'confirmed_statements' not in wire['career']['evidence'][0]
+    raw = {'assessments':[{'evidence_ids':['a'], 'quotes':[{'evidence_id':'a','source_quote_id':ident}]}]}
+    assert resolve_source_quotes(raw,catalog)['assessments'][0]['quotes'][0] == {'evidence_id':'a','text':text}
+    with pytest.raises(ValueError,match='uncited evidence'):
+        resolve_source_quotes({'assessments':[{'evidence_ids':['b'], 'quotes':[{'evidence_id':'b','source_quote_id':ident}]}]},catalog)
+
+
+def test_selected_shared_quote_resolves_to_every_cited_record_that_contains_it():
+    from career_pipeline.providers import resolve_source_quotes
+    catalog = {'q1':{'evidence_ids':['a','b'], 'text':'Shared original source paragraph.'}}
+    result = {'assessments':[{'evidence_ids':['a','b'], 'quotes':[{'evidence_id':'a','source_quote_id':'q1'}]}]}
+    quotes = resolve_source_quotes(result,catalog)['assessments'][0]['quotes']
+    assert quotes == [{'evidence_id':'a','text':'Shared original source paragraph.'},
+                      {'evidence_id':'b','text':'Shared original source paragraph.'}]
+
+
+def test_exhausted_credits_are_not_retried(monkeypatch):
+    import openai
+    from career_pipeline.diagnostics import failure_details
+    calls=[]
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(429,json={'error':{'message':'Synthetic exhausted credit balance',
+            'type':'insufficient_quota','code':'credit_balance_exhausted'}})
+    install_transport(monkeypatch,handler)
+    with pytest.raises(openai.RateLimitError) as caught:
+        OpenAIProvider().complete('generate',{},'gpt-4.1')
+    assert len(calls)==1
+    assert failure_details(caught.value)['code']=='provider_credit_exhausted'

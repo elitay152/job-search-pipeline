@@ -76,9 +76,9 @@ JSON is reserved for optional backup/import and the expandable technical audit.
 .venv/bin/career export RUN_ID --career fixtures/career.json
 ```
 
-The example selects Python/SQL ingestion and Airflow evidence, retains **estimated** savings, and surfaces Kubernetes and hybrid-location questions as gaps. No Kubernetes experience is invented. Drafts are labeled; final export is blocked until the deterministic audit passes and the user acknowledges review. Approval is bound to packet and evidence hashes. The CLI acknowledgement is an explicit user action, not an automated hiring or quality certification.
+The example selects Python/SQL ingestion and Airflow evidence, retains **estimated** savings, and surfaces unsupported Kubernetes experience as a gap; posting logistics do not trigger resume questions. No Kubernetes experience is invented. Drafts are labeled; final export is blocked until the deterministic audit passes and the user acknowledges review. Approval is bound to packet and evidence hashes. The CLI acknowledgement is an explicit user action, not an automated hiring or quality certification.
 
-The UI supports validated JSON evidence editing and local saving, a requirement map, previews, provenance, findings, revision diffs when present, run history, approval, and DOCX/Markdown/audit downloads. Resume and letter text can be edited in DOCX; edits made outside the app are outside its audit boundary. To use edited evidence, paste it into the editor or provide the local JSON to the CLI. Historical UI previews use the saved run snapshot; CLI exports reject an evidence-snapshot mismatch.
+The UI supports DOCX/TXT resume upload, persisted history, editable experience forms, optional JSON backups, a requirement map, previews, provenance, findings, revision diffs when present, run history, approval, and DOCX/Markdown/audit downloads. Resume and letter text can be edited in DOCX; edits made outside the app are outside its audit boundary. To use edited evidence, paste it into the editor or provide the local JSON to the CLI. Historical UI previews use the saved run snapshot; CLI exports reject an evidence-snapshot mismatch.
 
 ## Architecture and data flow
 
@@ -92,12 +92,12 @@ confirmed evidence + approved profile -> provider -> structured packet
 ```
 
 - `models.py`: employers, official titles/dates, projects, personal actions, ownership, technology usage, qualified metrics, sources, verification, approved wording and prohibited inferences. IDs must be stable and unique. Conflicting dates for the same employer/title are rejected. User-provided and previously confirmed evidence is eligible; legacy uncertain machine-extracted records remain excluded unless explicitly imported or saved by the user.
-- `pipeline.py`: framework-independent orchestration. Requirement extraction is a transparent line/heading baseline, with required/preferred/ambiguous labels and verbatim excerpts. Location and practical constraints require clarification; no sensitive personal characteristics are inferred. Retrieval is a replaceable protocol, currently tag and lexical overlap. “Direct” means all non-stopword tokens match available evidence text/tags; “transferable” means partial overlap, **not** a semantic certification. Inspect the map for multi-tool or nuanced requirements.
+- `pipeline.py`: framework-independent orchestration. Requirement extraction is a transparent line/heading baseline, with required/preferred/ambiguous labels and verbatim excerpts. Location and practical constraints are retained as posting context, excluded from resume questions and experience-gap findings; no sensitive personal characteristics are inferred. Retrieval is a replaceable protocol, currently tag and lexical overlap. “Direct” means all non-stopword tokens match available evidence text/tags; “transferable” means partial overlap, **not** a semantic certification. Inspect the map for multi-tool or nuanced requirements.
 - `providers.py`: provider protocol, deterministic mock, Anthropic and OpenAI Chat Completions adapters. Generator/reviewer settings are separate. Approved style instructions are loaded explicitly. Job descriptions, evidence, and reviewer messages remain data in prompts; generated facts still face a deterministic gate. The model reviewer cannot replace the factual auditor. Recruiter objections must reference a known claim and requirement; voice objections require a known claim.
 - `store.py`: SQLite run manifests, input snapshots, version events, rejected revision candidates, and content-addressed stage cache. Cache keys include provider/model, prompt version, settings and full stage payload. Manifests include hashes, schema/prompt/profile versions, model settings, stage latency/status, available usage/cost, revisions, stopping reason, validation, artifact paths and checksums. SQLite contains private content; stdout does not print snapshots.
 - `export.py`: Markdown/DOCX renderer uses official employment metadata with separately user-approved descriptive display titles, excludes internal IDs from application files, and writes a separate audit report. PDF is an optional capability stub returning an explicit unavailable result; no rendering dependency is required.
 
-Every generated revision candidate is persisted. The default revision limit is two, hard maximum three. Stop conditions include resolved actionable findings, limit, repeated/oscillating output, and budgets. Experience gaps remain visible and do not trigger endless edits. Factual failures yield `needs_review`, prevent approval/final export, and permit labeled draft previews. Schema/provider failures yield `failed` with the completed stage history and saved candidate retained. Each candidate receives separate evidence, recruiter and voice reviewer calls.
+Every generated revision candidate is persisted. The default revision limit is two, hard maximum three. Stop conditions include resolved actionable findings, limit, repeated/oscillating output, and budgets. Experience gaps remain visible and do not trigger endless edits. Factual failures yield `needs_review`, prevent approval/final export, and permit labeled draft previews. Schema/provider failures yield `failed` with the completed stage history and saved candidate retained. Known deterministic factual errors are repaired before paid review. Unchanged eligible source statements are checked locally; rewritten claims receive batched evidence-model review. Recruiter and voice editors see the complete draft. The audit distinguishes exact source comparisons from model-reviewed claims. Reviewers select numbered source excerpts; the backend resolves their quotations verbatim, including shared excerpts present in multiple cited records. Truncated batches split down to one claim, subject to the same budgets; incomplete review never permits final export.
 
 ### Evidence authoring contract
 
@@ -144,6 +144,26 @@ The small benchmark compares A: full confirmed record one-shot, B: retrieval plu
 
 `fixtures/adversarial.json` lists absent tools, injected instructions, conflicting dates, realized-versus-estimated savings, invented leadership and unsupported reviewer requests. Tests exercise these boundaries, end-to-end mock execution, uncertain sources, unknown IDs, snapshot gates, revision limits, repeated outputs, DOCX content and UI rendering. The benchmark itself is intentionally small; nuanced retrieval and live-model quality need a larger independently labeled corpus and blinded human evaluation.
 
+### Runtime budgets and document baseline
+
+After pulling an update, install its dependencies into the same virtual environment used by
+Streamlit: `python -m pip install -e ".[dev]"` (use `.\.venv\Scripts\python.exe` in Windows
+PowerShell). OpenAI token reservations use `tiktoken` with a safety margin and settle to reported
+usage. Encoding assets are downloaded on first use; if unavailable, a conservative byte estimate
+is used. Tests do not download tokenizer assets. Configured budgets are never raised automatically.
+Repeated source context is sent once with lossless references. Separate factual and presentation
+review payloads reduce repeated input; GPT-4-family calls use temperature zero, recorded in telemetry.
+
+Employment history, education and publications form a source-backed baseline. Education and publication wording is copied from saved source records; missing anchors
+are restored before review. Shared work under multiple titles at one employer is displayed once
+beneath those titles and dates, with narrower scope labeled when needed. Metric records can state
+whether a value is a level, reduction or increase; an estimated reduction must not become a usage
+level. Uncertainty qualifiers are checked against each relevant number. Later revisions that
+introduce unsupported facts restore previously validated wording, with the rejected edits retained
+in the audit. These checks reduce errors; live model judgments and writing quality still require
+human review. The latest real-resume acceptance run was interrupted by provider credit exhaustion;
+final live verification is incomplete, so this build is not declared application-ready. See [release verification](docs/release-verification.md) for checks actually run.
+
 ## Privacy and limits
 
 Local SQLite snapshots, cache, artifacts, personal evidence and samples contain private data. `.gitignore` excludes `local/`, `private/`, `artifacts/`, credentials and databases by default. Do not put personal files in public fixtures or writing_style/examples. Review files before staging. Delete the local database and artifacts to remove retained content; no automatic retention schedule or encryption at rest is implemented. Use a private machine and encrypted storage for sensitive data.
@@ -182,7 +202,7 @@ mock/UI tests are covered. Arbitrary page-count and ATS pass guarantees are inte
 
 Mock requests reserve one dry-run attempt rather than three live retry attempts; mock telemetry
 still reports zero actual provider tokens/cost. Live instructions appear once in the system prompt,
-not duplicated in user data. Prompt version v2 records this serialization change.
+not duplicated in user data. Prompt versions record these serialization changes.
 
 
 ## Personal pipeline and adversarial review
@@ -194,7 +214,7 @@ The UI uses saved input snapshots for historical runs. All three reviews must co
 approval; model factual errors cannot be waived by the deterministic auditor or vice versa.
 Software tests include a deficient-packet regression that catches thin role coverage, missing
 publications/education and missing skills, revises, and revalidates through the actual pipeline.
-Live adversarial quality remains unverified without a configured key and actual service calls.
+Live OpenAI checks and their limits are recorded in the release-verification document; they are not a broad quality benchmark or a guarantee that every generation will pass.
 
 
 ## OpenAI provider

@@ -2,6 +2,7 @@
 from pydantic import ValidationError
 
 CONTRACT_ERRORS = {
+    'Auditor supplied incomplete or nonliteral supporting quotes': 'The auditor marked a claim supported but did not supply literal quotes from every cited source.',
     'Reviewer returned findings for the wrong role': 'The reviewer returned findings for a different review role.',
     'Reviewer cited an unknown passage': 'The reviewer cited a passage that is not in this document version.',
     'Reviewer cited an unknown requirement': 'The reviewer cited a job requirement that does not exist.',
@@ -39,6 +40,11 @@ def failure_details(exc):
     if status == 401:
         code, message = 'provider_authentication', 'The provider rejected the API key. Check the key configured on this computer and restart Streamlit after changing it.'
     elif status == 429:
+        from .providers import exhausted_credit
+        if exhausted_credit(exc):
+            return {'code':'provider_credit_exhausted',
+                'message':'The model provider reports exhausted API credits. No further automatic retries were made. Saved drafts remain available; the incomplete review cannot approve final documents.',
+                'exception_type':type(exc).__name__}
         code, message = 'provider_quota', 'The provider reported a quota or rate limit. Check API billing and project limits; ChatGPT subscriptions do not include API credits.'
     elif status in (403,404):
         code, message = 'provider_access', 'The provider denied access to the requested model or endpoint. Check the selected model and project permissions.'

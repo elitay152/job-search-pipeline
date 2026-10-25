@@ -72,24 +72,59 @@ def preview(packet, career):
         else:
             unplaced.append(claim)
     shared_labels = {}
+    shared_scopes = {}
     for scope, claims in shared_claims.items():
         jobs = [roles[i] for i in scope if i in roles]
         label = 'Shared across ' + '; '.join(f'{resume_title(j)} at {j.employer}' for j in jobs)
         for claim in claims:
             shared_labels[claim.id] = label
+            shared_scopes[claim.id] = set(scope)
             for ident in scope:
                 if ident in job_claims:
                     job_claims[ident].append(claim)
     if roles or unplaced:
         resume += ['## Professional Experience']
-    # Headers come only from saved history, never the model's chosen bullets or their order.
+    # Shared work at one employer is printed once beneath all linked titles/dates.
+    # This preserves scope without duplicating an entire section after a promotion.
+    company_groups = {}
+    for scope in shared_claims:
+        employers = {roles[i].employer for i in scope if i in roles}
+        if len(employers) == 1 and all(i in roles for i in scope):
+            company_groups.setdefault(next(iter(employers)), set()).update(scope)
+    rendered_roles = set()
     for ident, job in roles.items():
-        resume += [f'### {resume_title(job)} — {job.employer}']
-        if job.start:
-            resume += [f'{resume_date(job.start)} – {resume_date(job.end)}']
-        for claim in job_claims[ident]:
-            scope_label = shared_labels.get(claim.id)
-            resume += [f'- {scope_label}: {claim.text}' if scope_label else f'- {claim.text}']
+        if ident in rendered_roles:
+            continue
+        grouped = company_groups.get(job.employer, set())
+        if ident in grouped:
+            jobs = [r for key, r in roles.items() if key in grouped]
+            resume += [f'### {job.employer}']
+            for member in jobs:
+                heading = resume_title(member)
+                if member.start:
+                    heading += f' | {resume_date(member.start)} – {resume_date(member.end)}'
+                resume += [heading]
+            resume += ['Selected accomplishments across these roles:']
+            seen = set()
+            for member in jobs:
+                for claim in job_claims[member.id]:
+                    if claim.id in seen:
+                        continue
+                    seen.add(claim.id)
+                    # Single-role claims retain their narrower attribution.
+                    label = ('' if shared_scopes.get(claim.id) == grouped else
+                             shared_labels[claim.id] + ': ' if claim.id in shared_labels else
+                             resume_title(member) + ': ')
+                    resume += [f'- {label}{claim.text}']
+            rendered_roles.update(grouped)
+        else:
+            resume += [f'### {resume_title(job)} — {job.employer}']
+            if job.start:
+                resume += [f'{resume_date(job.start)} – {resume_date(job.end)}']
+            for claim in job_claims[ident]:
+                scope_label = shared_labels.get(claim.id)
+                resume += [f'- {scope_label}: {claim.text}' if scope_label else f'- {claim.text}']
+            rendered_roles.add(ident)
     if unplaced:
         resume += ['### Experience requiring role clarification']
         resume += [f'- {claim.text}' for claim in unplaced]

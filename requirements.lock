@@ -53,3 +53,7 @@ urllib3==2.8.0
 uvicorn==0.54.0
 watchdog==6.0.0
 websockets==17.3
+
+# OpenAI token-budget estimation (Python 3.11+ compatible)
+regex==2026.9.29
+tiktoken==0.14.0

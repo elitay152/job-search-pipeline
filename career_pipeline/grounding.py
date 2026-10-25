@@ -14,9 +14,30 @@ TOOLS = ('python','pyspark','snowflake','sql server','databricks','power bi','db
 
 def numbers(text):
     clean = text.lower().replace(',', '')
-    # Compare common K/M renderings without allowing newly annualized/multiplied outcomes.
-    return {float(n) * {'k':1000, 'm':1000000, '':1}[unit] for n,unit in
-            re.findall(r'(?<![\w])([0-9]+(?:\.[0-9]+)?)\s*([km]?)(?![\w])', clean)}
+    # Normalize readable magnitude words and scientific notation without changing values.
+    pattern = r'(?<![\w.])([0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)\s*(thousand|million|billion|[kmb])?(?!\w)'
+    factors = {'k':1000, 'thousand':1000, 'm':1000000, 'million':1000000,
+               'b':1000000000, 'billion':1000000000, '':1}
+    return {float(n) * factors[unit] for n, unit in re.findall(pattern, clean)}
+
+
+def qualified_number(text, value, qualifier):
+    """Bind uncertainty to this number, not another metric later in the paragraph."""
+    clean = text.lower().replace(',', '')
+    pattern = r'(?<![\w.])([0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)\s*(thousand|million|billion|[kmb])?(?!\w)'
+    factors = {'k':1000, 'thousand':1000, 'm':1000000, 'million':1000000,
+               'b':1000000000, 'billion':1000000000, '':1}
+    previous_end = 0
+    found = []
+    for match in re.finditer(pattern, clean):
+        if float(match[1]) * factors[match[2] or ''] == value:
+            prefix = clean[max(previous_end, match.start()-100):match.start()]
+            # Accept an explicit parenthetical qualifier immediately following the value/unit.
+            suffix = clean[match.end():match.end()+50]
+            found.append(bool(re.search(r'\b(' + qualifier + r')\b', prefix)
+                or re.match(r'\s*(?:[a-z/-]+\s*){0,2}\((' + qualifier + r')\)', suffix)))
+        previous_end = match.end()
+    return all(found) if found else bool(re.search(r'\b(' + qualifier + r')\b', clean))
 
 
 def source_text(e):
@@ -78,15 +99,25 @@ def deterministic_objections(text, linked):
         if e.fact_details.get('metric'):
             metrics.append(e.fact_details['metric'])
         for m in metrics:
+            meaning = m.get('meaning', 'unspecified')
+            interpretation = str(e.fact_details.get('comparison', {}).get('interpretation', '')).lower()
+            if meaning == 'unspecified' and 'reduction' in interpretation:
+                meaning = 'reduction'
+            if meaning == 'reduction' and m['value'] in numbers(text):
+                value = re.escape(f"{m['value']:g}")
+                if (not re.search(r'\b(reduc\w*|decreas\w*|lower\w*|fewer|sav\w*|drop\w*)\b', low)
+                    or re.search(r'\b(?:to|at)\s+(?:approximately\s+|about\s+|roughly\s+)?' + value + r'\b', low)):
+                    issues.append('reduction presented as a usage level')
             relevant = m['value'] in numbers(text) or bool(re.search(r'\b(saved|savings|reduced|reduction|improved)\b', low))
             if not relevant:
                 continue
-            if m.get('qualifier') in ('estimated','approximately') and not re.search(r'\b(estimated|approximately|about|roughly)\b', low):
+            if m.get('qualifier') in ('estimated','approximately') and not qualified_number(text, m['value'], 'estimated|approximately|approx|about|roughly'):
                 issues.append('lost estimated/approximate qualifier')
-            if m.get('qualifier') == 'expected' and 'expected' not in low:
+            if m.get('qualifier') == 'expected' and not qualified_number(text, m['value'], 'expected'):
                 issues.append('expected outcome presented as realized')
     for verb in ('owned','led','managed','supervised','directed','architected'):
-        if re.search(r'\b' + verb + r'\b', low) and not re.search(r'\b' + verb + r'\b', original):
+        verb_pattern = r'\b' + verb + (r'\b(?!\s+to\b)' if verb == 'led' else r'\b')
+        if re.search(verb_pattern, low) and not re.search(r'\b' + verb + r'\b', original):
             if verb != 'owned' or not any(e.ownership == 'owned' for e in linked):
                 issues.append('unestablished ownership verb: ' + verb)
     if re.search(r'\b(doctor|doctorate|doctoral|phd)\b', low) and re.search(r'in progress|dissertation phase|enrolled', original) and not re.search(r'in progress|dissertation|enrolled|student|research', low):

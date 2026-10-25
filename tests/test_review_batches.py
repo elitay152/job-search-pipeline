@@ -91,3 +91,117 @@ def test_batches_respect_call_budget(monkeypatch, tmp_path):
         assert len(m['versions'][0]['reviews']['evidence']['attempts']) == 1
         with pytest.raises(ValueError):
             approve(store, m['id'], career, True)
+
+
+def test_positive_assessment_with_invented_quote_requires_contract_correction():
+    from career_pipeline.pipeline import validate_review_contract
+    career, packet = source_packet()
+    claim = packet.resume[0]
+    packet = Packet(resume=[claim], cover_letter=[])
+    assessment = {'claim_id':claim.id, 'evidence_ids':claim.evidence_ids,
+        'quotes':[{'evidence_id':claim.evidence_ids[0], 'text':'Invented source quotation.'}],
+        'wording_supported':True, 'metrics_consistent':True, 'technology_consistent':True,
+        'scope_consistent':True, 'dates_titles_consistent':True}
+    raw = {'findings':[], 'reviewed_claim_ids':[claim.id], 'assessments':[assessment]}
+    with pytest.raises(ValueError, match='supporting quotes'):
+        validate_review_contract(raw,'evidence',packet,[],career,'model_reviewed')
+    assessment['quotes'][0]['text'] = career.evidence[0].supported_wording[0]
+    assert validate_review_contract(raw,'evidence',packet,[],career,'model_reviewed')[1] == {claim.id}
+
+
+def test_known_factual_errors_are_revised_before_paid_reviews(monkeypatch, tmp_path):
+    from career_pipeline.providers import MockProvider
+    career, packet = source_packet()
+    packet.resume[0].text = 'Managed 50 engineers and administered Kubernetes clusters.'
+    calls = []
+    def complete(self, task, payload, model, max_tokens):
+        self.requests_made = 1
+        assert all('Managed 50' not in c['text'] for c in payload['packet']['resume'])
+        calls.append(task)
+        result = MockProvider().complete(task, payload, model)
+        return {'result': result, 'input_tokens': 10, 'output_tokens': 10}
+    monkeypatch.setattr(OpenAIProvider,'complete',complete)
+    with Store(str(tmp_path/'runs.sqlite')) as store:
+        m = run('Required: Python pipeline development.', career, store,
+                Settings(reviewer='openai', factual_mode='model_reviewed', max_revisions=1), seed_packet=packet)
+        assert m['versions'][0]['reviews']['evidence']['reason'] == 'deterministic_factual_errors'
+        assert m['telemetry'][0]['stage'] == 'revise'
+        assert calls and all(c == 'review' for c in calls)
+        assert not m['validation']
+
+
+def test_partial_revision_restores_a_passed_claim_if_new_wording_invents_facts(monkeypatch, tmp_path):
+    career, original = source_packet()
+    packet = Packet(resume=original.resume[:2], cover_letter=[])
+    packet.resume[1].text = 'Production pipeline number 1 using Python.'
+    index = {e.id:e for e in career.evidence}
+    def complete(self, task, payload, model, max_tokens):
+        self.requests_made = 1
+        if task == 'revise':
+            candidate = Packet.model_validate(payload['packet'])
+            candidate.resume[0].text = 'Managed 50 engineers.'
+            candidate.resume[1].text = index['e1'].supported_wording[0]
+            result = candidate.model_dump()
+        else:
+            claims = payload['packet']['resume'] + payload['packet']['cover_letter']
+            assessments = []
+            if payload['role'] == 'evidence':
+                for c in claims:
+                    assessments.append({'claim_id':c['id'], 'evidence_ids':c['evidence_ids'],
+                        'quotes':[{'evidence_id':i,'text':index[i].supported_wording[0]} for i in c['evidence_ids']],
+                        'wording_supported':not c['text'].startswith('Production'), 'metrics_consistent':True,
+                        'technology_consistent':True, 'scope_consistent':True, 'dates_titles_consistent':True})
+            result = {'findings':[], 'reviewed_claim_ids':[c['id'] for c in claims], 'assessments':assessments}
+        return {'result':result,'input_tokens':10,'output_tokens':10}
+    monkeypatch.setattr(OpenAIProvider,'complete',complete)
+    with Store(str(tmp_path/'runs.sqlite')) as store:
+        m = run('Required: Python pipeline development.',career,store,
+            Settings(generator='openai',reviewer='openai',factual_mode='model_reviewed',max_revisions=1,include_cover_letter=False),seed_packet=packet)
+        assert m['revision_restored_claims'][0]['claim_id'] == 'r0'
+        assert m['versions'][-1]['packet']['resume'][0]['text'] == index['e0'].supported_wording[0]
+        assert not m['validation']
+
+
+def test_verbatim_user_inputs_use_exact_comparison_not_model_reverification(monkeypatch, tmp_path):
+    career, packet = source_packet()
+    def complete(self, task, payload, model, max_tokens):
+        self.requests_made = 1
+        assert payload['role'] != 'evidence'
+        claims = payload['packet']['resume'] + payload['packet']['cover_letter']
+        return {'result':{'findings':[], 'reviewed_claim_ids':[c['id'] for c in claims], 'assessments':[]},
+                'input_tokens':10,'output_tokens':10}
+    monkeypatch.setattr(OpenAIProvider,'complete',complete)
+    with Store(str(tmp_path/'runs.sqlite')) as store:
+        m = run('Required: Python pipeline development.',career,store,
+            Settings(reviewer='openai',factual_mode='model_reviewed',max_revisions=0),seed_packet=packet)
+        receipt = m['versions'][0]['reviews']['evidence']
+        assert len(receipt['deterministic_claim_ids']) == 15
+        assert receipt['model_reviewed_claim_ids'] == []
+        assert receipt['status'] == 'passed'
+        assert not m['validation']
+
+
+def test_budget_stop_restores_a_fully_reviewed_packet(monkeypatch, tmp_path):
+    from career_pipeline.providers import Gateway
+    career, original = source_packet()
+    packet = Packet(resume=original.resume[:1],cover_letter=original.cover_letter[:1])
+    original_call = Gateway.call
+    def call(self, task, payload):
+        if task == 'revise':
+            raise ValueError('provider call/token budget exhausted before request')
+        return original_call(self,task,payload)
+    def complete(self,task,payload,model,max_tokens):
+        self.requests_made = 1
+        claims=payload['packet']['resume']+payload['packet']['cover_letter']
+        return {'result':{'findings':[], 'reviewed_claim_ids':[c['id'] for c in claims], 'assessments':[]},
+                'input_tokens':10,'output_tokens':10}
+    monkeypatch.setattr(Gateway,'call',call)
+    monkeypatch.setattr(OpenAIProvider,'complete',complete)
+    with Store(str(tmp_path/'runs.sqlite')) as store:
+        m=run('Required: Python pipeline development.',career,store,
+            Settings(reviewer='openai',factual_mode='model_reviewed',max_revisions=2),seed_packet=packet)
+        assert m['status']=='draft' and not m['validation']
+        assert m['stopping_reason']=='budget_limit_restored_reviewed_version'
+        assert m['versions'][-1]['restored_from_version']==0
+        assert not m['approved']
+        assert approve(store,m['id'],career,True)['approved']

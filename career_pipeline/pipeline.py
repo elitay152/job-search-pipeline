@@ -9,7 +9,7 @@ from .models import Career, Requirement, Packet, Finding, Settings
 from .providers import Gateway, PROMPT_VERSION, IncompleteResponse
 from .store import Store, digest, now
 from .review import audit, reviews, document_plan, group_key
-from .grounding import accepted_assessments
+from .grounding import accepted_assessments, deterministic_objections
 from .composition import build_composition_plan
 from .baseline import employment_baseline, ensure_history_bullets
 from .content_quality import check_content_quality
@@ -135,7 +135,15 @@ def validate_review_contract(raw, role, packet, requirements, career, factual_mo
     if role == 'evidence' and receipt != known:
         raise ValueError('Evidence reviewer did not account for every claim')
     if role == 'evidence' and factual_mode == 'model_reviewed':
-        accepted_assessments(packet, career, raw.get('assessments', []))
+        _, rejected = accepted_assessments(packet, career, raw.get('assessments', []))
+        quote_errors = {'not every cited record has an exact supporting quote', 'supporting quote is not present in the source'}
+        for assessment in raw.get('assessments', []):
+            # A positive verdict with malformed quotations is a response-contract error,
+            # not a reason to rewrite otherwise-supported source facts.
+            if all(assessment.get(key) for key in ('wording_supported', 'metrics_consistent',
+                    'technology_consistent', 'scope_consistent', 'dates_titles_consistent')) and (
+                    quote_errors & set(rejected.get(assessment['claim_id'], []))):
+                raise ValueError('Auditor supplied incomplete or nonliteral supporting quotes')
     return parsed, receipt
 
 
@@ -145,17 +153,31 @@ def batched_evidence_review(packet, payload, review_one, output_limit, records):
     All requests still pass through Gateway budgets and the per-batch review contract.
     Recruiter/voice reviews retain the complete document for cross-passage judgments.
     """
-    claims = packet.resume + packet.cover_letter
+    all_claims = packet.resume + packet.cover_letter
+    exact = set()
+    if payload.get('factual_mode') == 'model_reviewed':
+        career = Career.model_validate(payload['career'])
+        index = {e.id:e for e in career.evidence}
+        exact = {c.id for c in all_claims if all(i in index and index[i].eligible
+                 and c.text in index[i].supported_wording for i in c.evidence_ids)}
+    claims = [c for c in all_claims if c.id not in exact]
+    if exact:
+        records.append({'claim_ids':sorted(exact), 'status':'passed', 'method':'exact_source_comparison'})
     group_size = max(1, min(4, output_limit // 1400))
-    combined = {'findings': [], 'reviewed_claim_ids': [], 'assessments': []}
+    combined = {'findings': [], 'reviewed_claim_ids': sorted(exact), 'assessments': []}
 
     def process(group):
         ids = {c.id for c in group}
         subset = Packet(resume=[c for c in packet.resume if c.id in ids],
-            cover_letter=[c for c in packet.cover_letter if c.id in ids], skills=packet.skills)
-        linked = {i for c in group for i in c.evidence_ids} | set(packet.skills)
+            cover_letter=[c for c in packet.cover_letter if c.id in ids],
+            skills=packet.skills if not claims or claims[0].id in ids else [])
+        linked = {i for c in group for i in c.evidence_ids} | set(subset.skills)
         career = dict(payload['career'], evidence=[e for e in payload['career']['evidence'] if e['id'] in linked])
-        request = dict(payload, packet=subset.model_dump(), career=career, style='',
+        request = dict(role='evidence', packet=subset.model_dump(), career=career, style='',
+            requirements=[], factual_mode=payload['factual_mode'],
+            application_context=payload.get('job_description', '') if subset.cover_letter else '',
+            document_plan={'include_cover_letter': payload['document_plan'].get('include_cover_letter', True),
+                           'publications': [], 'education': [], 'experience_groups': [], 'skill_evidence': []},
             review_scope='Evidence review batch: inspect only the supplied claims. Other claims are reviewed separately; do not flag missing sections.')
         record = {'claim_ids': [c.id for c in group], 'status': 'running'}
         records.append(record)
@@ -176,7 +198,7 @@ def batched_evidence_review(packet, payload, review_one, output_limit, records):
         for key in combined:
             combined[key].extend(raw.get(key, []))
 
-    for start in range(0, max(1, len(claims)), group_size):
+    for start in range(0, len(claims) if exact else max(1, len(claims)), group_size):
         process(claims[start:start + group_size])
     return combined
 
@@ -190,7 +212,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
     manifest = {'id': run_id, 'created': now(), 'updated': now(), 'status': 'running',
         'application': {k: str((application or {}).get(k, '')).strip()[:300] for k in ('company', 'role')},
         'input_hash': digest(jd), 'evidence_hash': digest(career.model_dump(mode='json')),
-        'prompt_version': PROMPT_VERSION, 'schema_version': '5', 'employment_baseline': employment_baseline(career), 'style': style,
+        'prompt_version': PROMPT_VERSION, 'schema_version': '6', 'employment_baseline': employment_baseline(career), 'style': style,
         'settings': settings.model_dump(), 'strategy': strategy, 'stages': [], 'versions': [],
         'revision_count': 0, 'artifacts': [], 'approved': False,
         'review_mode': settings.reviewer, 'generation_mode': settings.generator,
@@ -210,6 +232,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
             manifest['stages'].append({'name': name, 'status': 'failed', 'latency': time.monotonic()-ts})
             store.save(manifest)
             raise
+    last_passing = None
     try:
         store.event(run_id, 'inputs', {'jd': jd, 'career': career.model_dump(mode='json')})
         stage('baseline_sources', lambda: ensure_history_bullets(Packet(resume=[], cover_letter=[]), career))
@@ -274,7 +297,25 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
             findings = stage('validate', lambda: reviews(packet, requirements, career, plan)) + quality
             version['findings'] = [f.model_dump() for f in findings]
             grounded = set()
-            if strategy == 'C':
+            preflight = []
+            if strategy == 'C' and settings.factual_mode == 'model_reviewed':
+                preflight.extend(f for f in findings if f.code == 'invalid_document_character')
+                index = {e.id: e for e in career.evidence}
+                for claim in packet.resume + packet.cover_letter:
+                    linked = [index[i] for i in claim.evidence_ids if i in index]
+                    for reason in deterministic_objections(claim.text, linked):
+                        preflight.append(Finding(role='evidence', claim_id=claim.id,
+                            evidence_ids=claim.evidence_ids, severity='error', code='grounding_rejected',
+                            message=reason + '. Remove the unsupported detail or cite a source that actually establishes it; a project label alone is not supporting evidence.'))
+                if preflight:
+                    # Repair known factual errors before paying for semantic/presentation reviews.
+                    # Unassessed paraphrases are not themselves factual errors in this mode.
+                    findings = [f for f in findings if f.code != 'unsupported_wording'] + preflight
+                    version['reviews'] = {role: {'status':'skipped', 'reason':'deterministic_factual_errors',
+                                                 'provider':settings.reviewer, 'model':settings.reviewer_model,
+                                                 'mode':settings.reviewer}
+                                          for role in ('evidence','recruiter','voice')}
+            if strategy == 'C' and not preflight:
                 for role in ('evidence', 'recruiter', 'voice'):
                     version['reviews'][role] = {'status': 'running', 'provider': settings.reviewer,
                                                 'model': settings.reviewer_model, 'mode': settings.reviewer}
@@ -282,6 +323,22 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                     role_payload = dict(payload, packet=packet.model_dump(), role=role,
                         career=career.model_dump(mode='json'))
                     role_payload.pop('evidence', None)  # The full career already contains these records.
+                    if role != 'evidence' and settings.reviewer != 'mock':
+                        # Factual auditing already has full source context. Presentation editors
+                        # need concise source summaries, not repeated transcripts and audit data.
+                        summaries = []
+                        for e in role_payload['career']['evidence']:
+                            summaries.append({k: e[k] for k in ('id', 'kind', 'project', 'employment_ids',
+                                'employer', 'official_title', 'ownership', 'technologies', 'confirmed_statements', 'approved_wording')}
+                                | {'actions': [], 'sources': [dict(reference='Saved source ' + e['id'], status=source['status'])
+                                                            for source in e['sources']]})
+                        role_payload['career']['evidence'] = summaries
+                        role_payload.pop('composition_plan', None)
+                        if role == 'voice':
+                            role_payload.pop('job_description', None)
+                            role_payload['requirements'] = []
+                            role_payload['document_plan'] = {'include_cover_letter': settings.include_cover_letter,
+                                'publications': [], 'education': [], 'experience_groups': [], 'skill_evidence': []}
                     try:
                         def review_one(request_packet, request_payload):
                             attempts = version['reviews'][role].setdefault('attempts', [])
@@ -316,6 +373,11 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                         if role == 'evidence' and settings.factual_mode == 'model_reviewed':
                             version['support_assessments'] = raw.get('assessments', [])
                             grounded, rejected = accepted_assessments(packet, career, version['support_assessments'])
+                            exact_ids = {ident for batch in version['reviews'][role].get('batches', [])
+                                         if batch.get('method') == 'exact_source_comparison' for ident in batch['claim_ids']}
+                            grounded.update(exact_ids)
+                            version['reviews'][role]['deterministic_claim_ids'] = sorted(exact_ids)
+                            version['reviews'][role]['model_reviewed_claim_ids'] = sorted(receipt - exact_ids)
                             version['support_rejections'] = rejected
                             findings = reviews(packet, requirements, career, plan, grounded) + quality
                             for ident, reasons in rejected.items():
@@ -350,7 +412,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                 manifest['stopping_reason'] = 'factual_regression_rollback'
                 store.save(manifest)
                 break
-            if strategy == 'C' and not has_errors:
+            if strategy == 'C' and not has_errors and not preflight:
                 last_passing = deepcopy(version)
             actionable = [f for f in version['findings'] if f['severity'] in ('error', 'suggestion')]
             if strategy != 'C' or not actionable:
@@ -362,6 +424,19 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
             seen.add(signature)
             candidate = stage('revise', lambda: Packet.model_validate(gateway.call('revise', dict(payload,
                 packet=packet.model_dump(), findings=actionable))))
+            if last_passing is None and grounded:
+                previous_claims = {c.id: c for c in packet.resume + packet.cover_letter}
+                index = {e.id: e for e in career.evidence}
+                for section in ('resume', 'cover_letter'):
+                    for position, claim in enumerate(getattr(candidate, section)):
+                        if claim.id in grounded and claim.id in previous_claims:
+                            linked = [index[i] for i in claim.evidence_ids if i in index]
+                            objections = deterministic_objections(claim.text, linked)
+                            if objections:
+                                getattr(candidate, section)[position] = previous_claims[claim.id].model_copy(deep=True)
+                                manifest.setdefault('revision_restored_claims', []).append({
+                                    'revision': revision + 1, 'claim_id': claim.id,
+                                    'reason': objections, 'from_version': version['number']})
             before_baseline = {c.id for c in candidate.resume}
             candidate = ensure_history_bullets(candidate, career)
             manifest['baseline_restored_claims'].extend(c.id for c in candidate.resume if c.id not in before_baseline)
@@ -381,11 +456,29 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
         manifest['status'] = 'needs_review' if manifest['validation'] or review_errors else 'draft'
         manifest['unresolved_findings'] = final['findings']
     except Exception as exc:
-        manifest['status'] = 'failed'
-        manifest['error_type'] = type(exc).__name__
-        manifest['failure'] = dict(failure_details(exc), stage=manifest.get('active_stage', 'setup'))
-        manifest['stopping_reason'] = 'stage_failure'
-        raise
+        if str(exc) == 'provider call/token budget exhausted before request' and last_passing is not None:
+            # A later optional revision must not turn an already reviewed packet into
+            # an unusable run. Preserve both the unfinished attempt and the restored version.
+            restored = deepcopy(last_passing)
+            restored.update(number=len(manifest['versions']), created=now(),
+                            restored_from_version=last_passing['number'])
+            manifest['versions'].append(restored)
+            manifest['budget_stop'] = dict(failure_details(exc), stage=manifest.get('active_stage', 'setup'))
+            manifest['stopping_reason'] = 'budget_limit_restored_reviewed_version'
+            final_packet = Packet.model_validate(restored['packet'])
+            accepted, _ = accepted_assessments(final_packet, career, restored.get('support_assessments', []))
+            manifest['validation'] = [f.model_dump() for f in audit(final_packet, career, accepted,
+                include_cover_letter=settings.include_cover_letter)]
+            manifest['unresolved_findings'] = restored['findings']
+            manifest['status'] = 'needs_review' if manifest['validation'] else 'draft'
+            store.event(run_id, 'version_restored', {'from_version':last_passing['number'],
+                        'reason':'budget_limit', 'packet_hash':restored['hash']})
+        else:
+            manifest['status'] = 'failed'
+            manifest['error_type'] = type(exc).__name__
+            manifest['failure'] = dict(failure_details(exc), stage=manifest.get('active_stage', 'setup'))
+            manifest['stopping_reason'] = 'stage_failure'
+            raise
     finally:
         manifest['updated'] = now()
         manifest['latency'] = time.monotonic()-started

@@ -34,6 +34,7 @@ class Technology(BaseModel):
     category: str = 'Tools'
 
 class Metric(BaseModel):
+    meaning: Literal['level', 'reduction', 'increase', 'unspecified'] = 'unspecified'
     value: float = Field(allow_inf_nan=False)
     unit: str
     qualifier: Literal['realized', 'estimated', 'expected']

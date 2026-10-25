@@ -52,7 +52,7 @@ def test_actual_review_revision_and_export(career, store, tmp_path):
     assert m['revision_count'] == 1
     assert len(m['versions']) == 2 and not m['approved']
     first, final = m['versions']
-    assert {'thin_role','missing_skills','missing_section_content'} <= {f['code'] for f in first['findings']}
+    assert {'thin_role','missing_skills'} <= {f['code'] for f in first['findings']}
     for version in m['versions']:
         assert set(version['reviews']) == {'evidence','recruiter','voice'}
         assert all(x['status']=='passed' for x in version['reviews'].values())
@@ -158,7 +158,7 @@ def test_anthropic_sdk_contract_without_network(monkeypatch):
         result=AnthropicProvider().complete('review',{'role':role,'style':'APPROVED_GUIDANCE','packet':{}},'synthetic-reviewer')
         assert result['input_tokens']==30 and result['output_tokens']==20
     assert len(calls)==3
-    assert 'adversarial evidence auditor' in calls[0]['system']
+    assert 'evidence auditor checking' in calls[0]['system']
     assert 'skeptical recruiter' in calls[1]['system']
     assert 'voice editor' in calls[2]['system']
     assert all('APPROVED_GUIDANCE' not in c['messages'][0]['content'] for c in calls)
@@ -242,13 +242,14 @@ def test_live_assessed_paraphrase_uses_quotes_and_independent_guards(career,stor
     def fake_live(self,task,payload,model,max_tokens=6000):
         packet=Packet.model_validate(payload['packet'])
         result={'findings':[],'reviewed_claim_ids':[c.id for c in packet.resume+packet.cover_letter],
-                'assessments':[assessment(c,career.evidence[0].supported_wording[0]) for c in packet.resume+packet.cover_letter]
+                'assessments':[assessment(c,next(e.supported_wording[0] for e in career.evidence if e.id == c.evidence_ids[0]), c.evidence_ids[0]) for c in packet.resume+packet.cover_letter]
                     if payload['role']=='evidence' else []}
         return {'result':result,'input_tokens':100,'output_tokens':100}
     monkeypatch.setattr(AnthropicProvider if provider=='anthropic' else OpenAIProvider,'complete',fake_live)
     m=run(JD,career,store,Settings(reviewer=provider,factual_mode='model_reviewed',max_revisions=0),seed_packet=seed)
     assert not m['validation']
     assert len(m['versions'][0]['support_assessments'])==2
+    assert len(m['versions'][0]['reviews']['evidence']['deterministic_claim_ids'])==2
     assert m['status']=='draft'  # Presentation objections remain, but semantic support isn't faked as exact equality.
     approve(store,m['id'],career,True)
     assert store.get(m['id'])['approved']

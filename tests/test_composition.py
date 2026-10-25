@@ -35,5 +35,5 @@ def test_plan_is_persisted_and_passed_to_each_role(monkeypatch,tmp_path):
     m=run(Path('fixtures/job.txt').read_text(),c,Store(str(tmp_path/'runs.sqlite')))
     assert len(seen)>=4
     assert all(plan==m['composition_plan'] for plan in seen)
-    assert len(m['composition_plan']['cover_letter_paragraphs'])==4
+    assert len(m['composition_plan']['cover_letter_paragraphs'])==3
     assert not m['validation']

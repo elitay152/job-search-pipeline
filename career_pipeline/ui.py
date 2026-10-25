@@ -305,7 +305,7 @@ with apply_tab:
         cycles = st.number_input('Maximum revision cycles', 0, 3, 2)
         token_budget = st.number_input('Token budget', min_value=1000, value=250000)
         output_limit = st.number_input('Maximum output tokens per call', min_value=256, max_value=16000, value=6000, help='Separate from the total budget. A truncated response can require a larger per-call allowance.')
-        call_budget = st.number_input('Call budget (includes retry reservations)', min_value=1, max_value=100, value=48)
+        call_budget = st.number_input('Call budget (includes actual retries)', min_value=1, max_value=100, value=48)
     with st.expander('Provider readiness'):
         for label, selected_provider in [('Generator', generator), ('Reviewer', reviewer)]:
             present = not configuration_problem(selected_provider)
@@ -319,7 +319,7 @@ with apply_tab:
                 (st.success if result['status'] == 'passed' else st.error)(label.title() + ': ' + result['message'])
         plan = budget_plan(Settings(max_revisions=cycles, max_calls=call_budget, token_budget=token_budget, max_output_tokens=output_limit))
         st.write(f"With one evidence batch per review: {plan['normal_calls']} stage calls across the selected revision cycles, or {plan['with_contract_corrections']} with reviewer corrections. Longer documents use additional small evidence-review batches; truncated batches split automatically. All requests remain subject to your call and token budgets. Early stopping and cache hits reduce usage.")
-        st.caption('Before each request, the pipeline reserves a conservative input-byte estimate plus the output limit and affordable retry capacity. Successful requests settle to reported token usage. A total budget can stop a run even when earlier calls succeeded; it is never raised automatically.')
+        st.caption('Before each request, the pipeline reserves an input-token estimate with a safety margin, the output limit and affordable retry capacity. OpenAI uses its tokenizer when available; other models or unavailable tokenizer assets use a conservative byte estimate. Successful requests settle to reported token usage. A total budget can stop a run even when earlier calls succeeded; it is never raised automatically.')
     problems = [message for p in set((generator, reviewer)) if (message := configuration_problem(p))]
     missing_jobs = missing_source_jobs(career)
     if missing_jobs:
@@ -372,7 +372,9 @@ with review_tab:
             st.error('The saved evidence snapshot is unavailable. Rerun before approval or export.')
         if m['versions'] and snapshot:
             if 'restored_from_version' in m['versions'][-1]:
-                st.info(f"Restored version {m['versions'][-1]['restored_from_version'] + 1} because later edits introduced review errors. The rejected version remains in review history.")
+                reason = ('the remaining budget could not cover the latest revision review'
+                          if m.get('budget_stop') else 'later edits introduced review errors')
+                st.info(f"Restored reviewed version {m['versions'][-1]['restored_from_version'] + 1} because {reason}. All attempted versions remain in review history.")
             packet = Packet.model_validate(m['versions'][-1]['packet'])
             resume, letter = preview(packet, snapshot)
             requirements = [Requirement.model_validate(q) for q in m.get('requirements', [])]

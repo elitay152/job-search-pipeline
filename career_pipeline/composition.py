@@ -38,6 +38,5 @@ def build_composition_plan(career, selected):
         'cover_letter_paragraphs': [
             {'purpose': 'Opening', 'instruction': 'Connect the named role to the strongest supported relevant experience. Use company/job names only if supplied.'},
             {'purpose': 'Relevant example', 'instruction': 'Explain one coherent supported project: personal actions, technical context and a supported result where available.'},
-            {'purpose': 'Contribution', 'instruction': 'Connect another supported capability to a stated job responsibility. Do not invent motivation, company facts, or promises of results.'},
-            {'purpose': 'Close', 'instruction': 'Keep the close concise; the renderer adds the greeting and closing courtesy.'}],
+            {'purpose': 'Contribution', 'instruction': 'Connect another supported capability to a stated job responsibility. Do not invent motivation, company facts, or promises of results. The renderer supplies the closing courtesy; do not generate a separate closing paragraph.'}],
         'provenance_instruction': 'Every factual passage retains its supporting evidence IDs. A plan is organization guidance, never additional factual evidence.'}
