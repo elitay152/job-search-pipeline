@@ -36,13 +36,13 @@ def evaluate(output='local/evaluation.json'):
     with tempfile.TemporaryDirectory() as tmp:
         for case, jd in cases:
             for strategy in ('A','B','C'):
-                store = Store(str(Path(tmp)/f'{case}-{strategy}.sqlite'))
-                m = run(jd, career, store, Settings(token_budget=100000), strategy=strategy)
-                metrics = judge(m['versions'][-1]['packet'], career,
-                    {'python_sql':['ev-pipeline'], 'quality':['ev-pipeline'], 'airflow':['ev-orchestration']})
-                metrics.update(latency=m['latency'], input_tokens=sum(t['input_tokens'] for t in m['telemetry']),
-                               output_tokens=sum(t['output_tokens'] for t in m['telemetry']), estimated_cost=m['estimated_cost'])
-                results.append({'case':case, 'strategy':strategy, 'mode':'deterministic_mock', 'metrics':metrics})
+                with Store(str(Path(tmp)/f'{case}-{strategy}.sqlite')) as store:
+                    m = run(jd, career, store, Settings(token_budget=100000), strategy=strategy)
+                    metrics = judge(m['versions'][-1]['packet'], career,
+                        {'python_sql':['ev-pipeline'], 'quality':['ev-pipeline'], 'airflow':['ev-orchestration']})
+                    metrics.update(latency=m['latency'], input_tokens=sum(t['input_tokens'] for t in m['telemetry']),
+                                   output_tokens=sum(t['output_tokens'] for t in m['telemetry']), estimated_cost=m['estimated_cost'])
+                    results.append({'case':case, 'strategy':strategy, 'mode':'deterministic_mock', 'metrics':metrics})
     report = {'label':'MEASURED MOCK RESULTS — no live-model quality claims',
         'strategies':{'A':'Full confirmed career, one-shot', 'B':'Retrieved evidence, one-shot', 'C':'Retrieved evidence with bounded review'},
         'judge':'Deterministic approved-wording holdout checks and manually labeled supported requirements; not the optimizing reviewer',

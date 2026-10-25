@@ -46,3 +46,13 @@ The benchmark uses deterministic mock models and does not measure live writing q
 Relaunch gate: merge the branch and check the Windows/Ubuntu CI matrix. PDF rendering remains
 optional; actual LibreOffice conversion and visual review should stay open until performed.
 Do not claim the user's larger private application has been regenerated or approved by these tests.
+
+## Windows CI cleanup correction — 2026-10-25
+
+The supplied Windows traceback identified `test_evaluation`: temporary SQLite files were still
+open when `TemporaryDirectory` attempted deletion (WinError 32). Linux allowed the unlink,
+so the earlier Linux runs did not expose the leaked handles. Evaluation now uses a closing
+`Store` context for each case, including exceptions in generation or judging. Regression tests
+retain all connection references and verify they are closed before temporary-directory cleanup.
+The updated Linux suite passes 111 tests; the evaluation CLI also completes. Windows CI must
+rerun to confirm the reported platform failure is resolved.
