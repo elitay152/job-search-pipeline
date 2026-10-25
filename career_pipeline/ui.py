@@ -202,6 +202,7 @@ with apply_tab:
     st.header('Tailor your next application')
     if not career.evidence:
         st.info('First, add your experience in My experience, import a backup, or try the synthetic example in the sidebar.')
+    include_cover_letter = st.checkbox('Include a cover letter', value=True, help='Choose your documents here. Turn this off to create and download only a resume.')
     st.subheader('1. Choose the role')
     company_name = st.text_input('Company (optional)')
     role_name = st.text_input('Role (optional)')
@@ -223,11 +224,14 @@ with apply_tab:
             validation_message(exc)
             requirements = []
         summary = fit_report(requirements)
-        cols = st.columns(3)
-        cols[0].metric('Direct evidence', summary['direct'])
-        cols[1].metric('Transferable evidence', summary['transferable'])
-        cols[2].metric('Gaps to review', summary['gaps'] + summary['clarifications'])
-        st.caption('Evidence coverage uses transparent lexical matching, not an ATS score or a prediction of hiring outcomes.')
+        if not requirements:
+            st.warning('No job requirements were recognized. Add the responsibilities and qualifications from the posting; these counters are not a zero-match assessment.')
+        else:
+            cols = st.columns(3)
+            cols[0].metric('Direct evidence', summary['direct'])
+            cols[1].metric('Transferable evidence', summary['transferable'])
+            cols[2].metric('Gaps to review', summary['gaps'] + summary['clarifications'])
+            st.caption('Evidence coverage uses transparent lexical matching, not an ATS score or a prediction of hiring outcomes.')
         gaps = [q for q in requirements if q.classification in ('unsupported', 'needs_clarification')]
         job_hash = digest(jd)
         intake_id = 'intake-' + job_hash
@@ -312,7 +316,7 @@ with apply_tab:
     if st.button('Create my draft', type='primary', disabled=bool(problems) or not any(e.eligible for e in career.evidence) or len(jd.strip()) < 20):
         try:
             with st.spinner('Matching evidence, writing and reviewing your application…'):
-                m = run(jd, career, store, Settings(generator=generator, reviewer=reviewer, factual_mode=factual_mode,
+                m = run(jd, career, store, Settings(generator=generator, reviewer=reviewer, factual_mode=factual_mode, include_cover_letter=include_cover_letter,
                     generator_model=generator_model, reviewer_model=reviewer_model, max_revisions=cycles,
                     token_budget=token_budget, max_calls=call_budget, max_output_tokens=output_limit, content_quality=ContentQualitySettings(enabled=quality_enabled,
                         minimum_bullet_words=minimum_bullet_words, minimum_letter_words=minimum_letter_words)), style_path=style_path, application={'company': company_name, 'role': role_name})
@@ -370,7 +374,10 @@ with review_tab:
             with resume_tab:
                 st.markdown(resume)
             with letter_tab:
-                st.markdown(letter)
+                if m['settings'].get('include_cover_letter', True):
+                    st.markdown(letter)
+                else:
+                    st.info('No cover letter requested for this application.')
             with notes_tab:
                 quality_status = m['versions'][-1].get('content_quality_status', 'not_recorded')
                 st.caption('Writing-quality checks: ' + quality_status.replace('_', ' ') + '. These are presentation heuristics, not factual certification.')

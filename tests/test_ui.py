@@ -137,3 +137,26 @@ def test_readiness_named_application_and_missing_renderer(workspace, monkeypatch
     assert not app.exception
     assert any('LibreOffice is not installed' in i.value for i in app.info)
     assert list((workspace/'artifacts').rglob('resume.docx'))
+
+
+def test_top_level_cover_letter_choice_and_plain_job_counts(workspace):
+    app = AppTest.from_file(str(ROOT/'career_pipeline/ui.py')).run()
+    field(app, 'button', 'Load synthetic example').click().run()
+    field(app, 'checkbox', 'Include a cover letter').uncheck()
+    field(app, 'text_area', 'Paste the job description').set_value('Experience with Python and SQL ingestion.\nKnowledge of Airflow scheduling.').run()
+    counts = [int(m.value) for m in app.metric if m.label in ('Direct evidence', 'Transferable evidence')]
+    assert sum(counts) > 0
+    field(app, 'button', 'Create my draft').click().run(timeout=20)
+    assert not app.exception
+    field(app, 'button', 'Prepare documents').click().run()
+    paths = app.session_state['downloads']
+    assert any(p.endswith('resume.docx') for p in paths)
+    assert not any('cover_letter' in p for p in paths)
+
+
+def test_no_requirements_shows_empty_state_instead_of_zero_match(workspace):
+    app = AppTest.from_file(str(ROOT/'career_pipeline/ui.py')).run()
+    field(app, 'button', 'Load synthetic example').click().run()
+    field(app, 'text_area', 'Paste the job description').set_value('About the job\nWelcome to our wonderful company.').run()
+    assert any('No job requirements were recognized' in w.value for w in app.warning)
+    assert not any(m.label == 'Direct evidence' for m in app.metric)

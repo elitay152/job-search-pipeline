@@ -88,7 +88,10 @@ def test_gap_decisions_are_saved_with_run_without_becoming_claims(tmp_path):
     store = Store(str(tmp_path/'runs.sqlite'))
     store.event('intake-' + digest(jd), 'follow_up', {'requirement_id':'q1','answer':'No relevant experience','kind':'gap'})
     m = run(jd, c, store, Settings(), style_path=Path(__file__).resolve().parents[1]/'writing_style')
-    assert m['status'] == 'needs_review'
+    # A genuine skill gap does not erase supported work history or invent that skill.
+    assert m['status'] == 'draft'
+    assert m['versions'][-1]['packet']['resume']
+    assert any(f['code'] == 'experience_gap' for f in m['unresolved_findings'])
     assert m['follow_up_answers']['q1']['answer'] == 'No relevant experience'
     assert m['requirements'][0]['classification'] == 'unsupported'
     assert not any('Kubernetes' in claim['text'] for v in m['versions'] for claim in v['packet']['resume'])

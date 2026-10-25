@@ -15,6 +15,7 @@ def main():
     r = sub.add_parser('run')
     r.add_argument('--jd', required=True)
     r.add_argument('--career', required=True)
+    r.add_argument('--resume-only', action='store_true', help='Omit cover-letter generation and export')
     r.add_argument('--company', default='')
     r.add_argument('--role', default='')
     r.add_argument('--style', default='writing_style')
@@ -70,7 +71,7 @@ def main():
             print(json.dumps(export_pdf(store, args.run_id, paths)))
         elif args.command == 'run':
             career = Career.model_validate_json(Path(args.career).read_text(encoding='utf-8'))
-            settings = Settings(generator=args.generator, reviewer=args.reviewer, max_revisions=args.max_revisions,
+            settings = Settings(generator=args.generator, reviewer=args.reviewer, max_revisions=args.max_revisions, include_cover_letter=not args.resume_only,
                 factual_mode=args.factual_mode or ('model_reviewed' if args.reviewer != 'mock' else 'strict'),
                 generator_model=args.generator_model,
                 reviewer_model=args.reviewer_model,

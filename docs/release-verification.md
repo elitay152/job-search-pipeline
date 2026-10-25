@@ -56,3 +56,30 @@ so the earlier Linux runs did not expose the leaked handles. Evaluation now uses
 retain all connection references and verify they are closed before temporary-directory cleanup.
 The updated Linux suite passes 111 tests; the evaluation CLI also completes. Windows CI must
 rerun to confirm the reported platform failure is resolved.
+
+## Job intake and work-history correction
+
+Unbulleted job descriptions could yield no extracted requirements. Selection then retained
+education/publications/standalone skills while omitting employment evidence. Intake now handles
+plain qualification and responsibility lines, numbered lists and Markdown headings, retaining
+original excerpts. Empty extraction displays an explanation rather than zero-match counters.
+
+Selection independently anchors confirmed employment scopes, ranking their evidence by relevance.
+A deterministic completeness gate blocks approval/final export when a confirmed employment scope
+has no rendered resume passage. An unsupported target skill remains a gap and cannot erase real
+career history. Uncertain employment evidence is not forced into the document.
+
+The top-level cover-letter checkbox is persisted through planning, generation, review, and export;
+resume-only runs return no letter claims or files. Default and older runs continue to require both.
+The CLI provides `--resume-only`.
+
+Validation: 124 automated tests passed on Linux, including multiple employment scopes, empty
+retrieval, unsupported target tools, education/publication-only output, plain-text counter updates,
+resume-only approval/export and existing factual gates. Mock evaluation CLI completed. Windows
+CI must verify the branch after push; personal application output was not regenerated here.
+
+Live OpenAI/gpt-4.1 synthetic verification also completed: two requirements recognized from plain
+text, employer and Professional Experience rendered, zero cover-letter claims when unselected,
+and zero final factual-validation errors. It stopped as an unapproved draft after restoring the
+previous passing version following a revision regression (27.46 seconds). This is a workflow
+check using fictional evidence, not a human assessment of writing quality.

@@ -296,3 +296,18 @@ proof those jobs passed; inspect GitHub Actions before release. See
 If presentation edits introduce new review errors after a packet has passed, the pipeline restores
 that exact passing packet and stops. Both the rejected edit and restored version remain in the
 audit. Restoring a version does not mark it user-approved or remove unresolved presentation gaps.
+
+At the top of **Create application**, **Include a cover letter** controls which documents are
+created. Clear it for a resume-only run; the selection is saved with the run and honored by
+review, approval, and export. The CLI equivalent is `career run ... --resume-only`.
+Existing runs retain their original document selection.
+
+Job intake recognizes ordinary qualification/responsibility lines, numbered lists and Markdown
+headings. If no requirements are recognized, the UI explains that extraction is empty instead
+of showing a misleading zero-match summary. Coverage remains lexical and should be reviewed.
+
+Confirmed work history is retained independently of job-description keyword matching. Retrieval
+chooses relevant evidence within each employment scope; it cannot remove every job when a posting
+has unfamiliar wording. A resume missing a confirmed employment scope is marked incomplete and
+blocked from final approval/export. Uncertain evidence remains excluded. Old runs are preserved;
+create a new run to use the updated selection and document options.

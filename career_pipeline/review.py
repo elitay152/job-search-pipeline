@@ -27,7 +27,7 @@ def document_plan(career, selected):
                         'Preserve contextual labels for portfolio, academic and training tools.'}
 
 
-def audit(packet, career, grounded_claims=None):
+def audit(packet, career, grounded_claims=None, include_cover_letter=True):
     """Fail closed on wording, references, uncertainty and extra skills.
 
     Exact confirmed factual statements are supported source text, not a claim that a user
@@ -47,13 +47,28 @@ def audit(packet, career, grounded_claims=None):
         if not valid and claim.id not in grounded_claims:
             findings.append(Finding(role='evidence', claim_id=claim.id, evidence_ids=claim.evidence_ids,
                 severity='error', code='unsupported_wording', message='Claim is not exact supported wording from every linked, confirmed record.'))
+    # The renderer assigns a passage to its first evidence record's section.
+    rendered_groups = {group_key(index[c.evidence_ids[0]]) for c in packet.resume
+                       if c.evidence_ids and c.evidence_ids[0] in index
+                       and index[c.evidence_ids[0]].kind == 'experience'}
+    eligible_groups = {}
+    for e in career.evidence:
+        if e.eligible and e.kind == 'experience':
+            eligible_groups.setdefault(group_key(e), []).append(e.id)
+    for group, ids in eligible_groups.items():
+        if group not in rendered_groups:
+            findings.append(Finding(role='recruiter', severity='error', section='experience',
+                evidence_ids=ids, code='missing_employment_history',
+                message='A confirmed employment scope has no rendered resume passage. Include supported work history from these sources; do not invent new experience.'))
     for ident in packet.skills:
         e = index.get(ident)
         if not e or not e.eligible or not e.technologies:
             findings.append(Finding(role='evidence', evidence_ids=[ident], section='skills',
                 severity='error', code='unsupported_skill', message='Skill source is missing, uncertain or has no supported technology.'))
-    if not packet.resume or not packet.cover_letter:
-        findings.append(Finding(role='evidence', severity='error', section='packet', code='empty_packet', message='Resume and letter require factual content.'))
+    if packet.cover_letter and not include_cover_letter:
+        findings.append(Finding(role='evidence', severity='error', section='cover_letter', code='unrequested_document', message='Cover letter was not requested; return an empty cover_letter array.'))
+    if not packet.resume or (include_cover_letter and not packet.cover_letter):
+        findings.append(Finding(role='evidence', severity='error', section='packet', code='empty_packet', message='Each requested document requires factual content.'))
     ids = [c.id for c in packet.resume + packet.cover_letter]
     if len(ids) != len(set(ids)):
         findings.append(Finding(role='evidence', severity='error', section='packet', code='duplicate_claim_id', message='Claim IDs must be unique.'))
@@ -61,7 +76,7 @@ def audit(packet, career, grounded_claims=None):
 
 
 def reviews(packet, requirements, career, plan=None, grounded_claims=None):
-    findings = audit(packet, career, grounded_claims)
+    findings = audit(packet, career, grounded_claims, include_cover_letter=(plan or {}).get('include_cover_letter', True))
     claims = packet.resume + packet.cover_letter
     used = {i for c in claims for i in c.evidence_ids} | set(packet.skills)
     for q in requirements:

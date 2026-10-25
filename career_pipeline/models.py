@@ -184,6 +184,7 @@ class ContentQualitySettings(BaseModel):
 
 
 class Settings(BaseModel):
+    include_cover_letter: bool = True
     content_quality: ContentQualitySettings = Field(default_factory=ContentQualitySettings)
     generator: Literal['mock', 'anthropic', 'openai'] = 'mock'
     reviewer: Literal['mock', 'anthropic', 'openai'] = 'mock'

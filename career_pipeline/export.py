@@ -86,7 +86,7 @@ def preview(packet, career):
             resume += [c.text for c in sections[kind]]
     letter = [f'# {career.display_name}', *career.contact, 'Dear Hiring Team,',
               *[c.text for c in packet.cover_letter], 'Thank you for your consideration.']
-    return '\n\n'.join(resume), '\n\n'.join(letter)
+    return '\n\n'.join(resume), '\n\n'.join(letter) if packet.cover_letter else ''
 
 
 def packet_audit(packet, career, manifest):
@@ -95,7 +95,7 @@ def packet_audit(packet, career, manifest):
         if manifest['settings'].get('reviewer') not in ('anthropic', 'openai'):
             raise ValueError('Mock reviewers cannot authorize paraphrases')
         accepted, _ = accepted_assessments(packet, career, manifest['versions'][-1].get('support_assessments', []))
-    return audit(packet, career, accepted)
+    return audit(packet, career, accepted, include_cover_letter=manifest.get('settings', {}).get('include_cover_letter', True))
 
 
 def require_review_complete(manifest):
@@ -142,6 +142,8 @@ def export(store, run_id, career, directory='artifacts', draft=False):
     paths = []
     render_warnings = []
     for name, text in zip(('resume', 'cover_letter'), preview(packet, career)):
+        if name == 'cover_letter' and not m.get('settings', {}).get('include_cover_letter', True):
+            continue
         if draft:
             text = 'DRAFT — NOT APPROVED\n\n' + text
         invalid = XML_INVALID.findall(text)
