@@ -64,3 +64,10 @@ def ensure_history_bullets(packet, career):
         result.resume.append(Claim(id=ident, text=source.supported_wording[0], evidence_ids=[source.id]))
         covered.update(evidence_roles(source, baseline))
     return result
+
+
+def missing_source_jobs(career):
+    baseline = employment_baseline(career)
+    supported = {ident for e in career.evidence if e.eligible and e.kind == 'experience'
+                 for ident in evidence_roles(e, baseline)}
+    return [job for job in baseline['jobs'] if job['id'] not in supported]

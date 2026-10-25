@@ -54,9 +54,9 @@ def test_extraction_cannot_introduce_facts_or_empty_jobs(change):
 def test_intake_adapter_uses_resume_schema_and_keeps_raw_input_untrusted(monkeypatch):
     from career_pipeline.providers import OpenAIProvider
     def fake(self,task,payload,model,max_tokens):
-        assert task=='intake' and payload=={'resume_text':TEXT}
+        assert task=='intake' and payload['resume_lines'][0]=={'id':0,'text':'Morgan Example'}
         assert self.max_attempts==1 and max_tokens==12000
-        return {'result':parsed().model_dump()}
+        return {'result':{'name_line_id':0,'contact_line_ids':[1], 'jobs':[{'employer':'Synthetic Co','title':'Data Engineer','start':'2023-01','end':None,'header_line_ids':[2],'bullet_line_ids':[3]}], 'education_line_ids':[5],'publication_line_ids':[],'skill_line_ids':[7]}}
     monkeypatch.setattr(OpenAIProvider,'complete',fake)
     career,text=extract_resume(TEXT.encode(),'resume.txt')
     assert text==TEXT and career.employments[0].employer=='Synthetic Co'
@@ -86,3 +86,38 @@ def test_conflicting_dates_do_not_overwrite_or_duplicate_saved_history():
 def test_extraction_cannot_silently_omit_a_source_bullet():
     with pytest.raises(ValueError,match='omitted a source bullet'):
         to_career(parsed(),TEXT+'\n- Built SQL validation checks.','synthetic upload')
+
+
+def test_indexed_intake_preserves_punctuation_and_multiline_headers():
+    from career_pipeline.resume_intake import IndexedResumeIntake,from_line_selection
+    lines=['Morgan Example','Synthetic Co','Data Engineer','January 2023 – Present',
+           'Built “exact-source” Python ingestion—estimated savings of 20 hours/month.']
+    selected=IndexedResumeIntake(name_line_id=0, contact_line_ids=[],jobs=[dict(employer='Synthetic Co',title='Data Engineer',start='2023-01',end=None,header_line_ids=[1,2,3],bullet_line_ids=[4])],education_line_ids=[],publication_line_ids=[],skill_line_ids=[])
+    result=to_career(from_line_selection(selected,lines),'\n'.join(lines),'synthetic upload')
+    assert result.evidence[0].supported_wording[0]==lines[4]
+    selected.jobs[0].bullet_line_ids=[999]
+    with pytest.raises(ValueError,match='invalid source line'):
+        from_line_selection(selected,lines)
+
+
+def test_indexed_intake_correction_is_bounded(monkeypatch):
+    from career_pipeline.providers import OpenAIProvider
+    calls=[]
+    def fake(self,task,payload,model,max_tokens):
+        calls.append(payload)
+        return {'result':{'name_line_id':999,'contact_line_ids':[], 'jobs':[], 'education_line_ids':[],'publication_line_ids':[],'skill_line_ids':[]}}
+    monkeypatch.setattr(OpenAIProvider,'complete',fake)
+    with pytest.raises(ValueError,match='invalid source line'):
+        extract_resume(TEXT.encode(),'resume.txt')
+    assert len(calls)==2 and 'correction' in calls[-1]
+
+
+def test_indexed_intake_keeps_technical_projects_instead_of_dropping_their_bullets():
+    from career_pipeline.resume_intake import IndexedResumeIntake,from_line_selection
+    lines=[line for line in TEXT.splitlines() if line] + ['Technical Projects','Synthetic monitoring project','- Built a Python monitoring prototype.']
+    selection=IndexedResumeIntake(name_line_id=0,contact_line_ids=[1],
+        jobs=[dict(employer='Synthetic Co',title='Data Engineer',start='2023-01',end=None,header_line_ids=[2],bullet_line_ids=[3])],
+        education_line_ids=[5],publication_line_ids=[],skill_line_ids=[7],
+        projects=[dict(title_line_id=9,statement_line_ids=[10])])
+    result=to_career(from_line_selection(selection,lines),'\n'.join(lines),'synthetic upload')
+    assert any(e.kind=='project' and 'monitoring prototype' in e.supported_wording[0] for e in result.evidence)

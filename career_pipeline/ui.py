@@ -17,6 +17,7 @@ from career_pipeline.job_input import load_job_url
 from career_pipeline.models import Requirement, ContentQualitySettings
 from career_pipeline.report import review_report
 from career_pipeline.readiness import app_version, check_provider, budget_plan
+from career_pipeline.baseline import missing_source_jobs
 from career_pipeline.ui_errors import configuration_problem, failure_message
 
 
@@ -327,6 +328,10 @@ with apply_tab:
         st.write(f"Up to {plan['normal_calls']} stage calls across the selected revision cycles; up to {plan['with_contract_corrections']} with reviewer corrections, before transient retries. Early stopping and cache hits may reduce this.")
         st.caption('Before each request, the pipeline reserves a conservative input-byte estimate plus the output limit and affordable retry capacity. Successful requests settle to reported token usage. A total budget can stop a run even when earlier calls succeeded; it is never raised automatically.')
     problems = [message for p in set((generator, reviewer)) if (message := configuration_problem(p))]
+    missing_jobs = missing_source_jobs(career)
+    if missing_jobs:
+        labels = '; '.join(j['employer'] + ' — ' + j['official_title'] for j in missing_jobs)
+        problems.append('These saved jobs have no linked source bullets: ' + labels + '. Import your resume in My experience or restore a complete evidence backup. No new accomplishments need to be invented.')
     for message in problems:
         st.error(message)
     if st.button('Create my draft', type='primary', disabled=bool(problems) or not any(e.eligible for e in career.evidence) or len(jd.strip()) < 20):
