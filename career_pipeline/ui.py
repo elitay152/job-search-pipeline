@@ -250,7 +250,7 @@ with apply_tab:
             cols[1].metric('Transferable evidence', summary['transferable'])
             cols[2].metric('Gaps to review', summary['gaps'] + summary['clarifications'])
             st.caption('Evidence coverage uses transparent lexical matching, not an ATS score or a prediction of hiring outcomes.')
-        gaps = [q for q in requirements if q.classification in ('unsupported', 'needs_clarification')]
+        gaps = [q for q in requirements if q.kind == 'skill' and q.classification in ('unsupported', 'needs_clarification')]
         job_hash = digest(jd)
         intake_id = 'intake-' + job_hash
         saved_answers = store.follow_up_answers(job_hash)
@@ -262,32 +262,25 @@ with apply_tab:
                 if q.id in saved_answers:
                     st.info('Saved response: ' + saved_answers[q.id]['answer'])
                 with st.form('followup_' + job_hash[:12] + q.id):
-                    if q.kind == 'constraint':
-                        answer = st.text_input('Does this practical requirement work for you?', placeholder='Confirm, describe a constraint, or leave unresolved')
-                        if st.form_submit_button('Save preference'):
-                            if answer.strip():
-                                store.event(intake_id, 'follow_up', {'requirement_id': q.id, 'answer': answer, 'kind': 'preference'})
-                                st.rerun()
-                    else:
-                        choice = st.radio('Do you have relevant experience?', ['Add experience', 'No relevant experience', 'Decide later'], key='choice_' + job_hash[:12] + q.id)
-                        answer = st.text_area('What did you personally do?', key='answer_' + job_hash[:12] + q.id,
-                            help='Include scope and actual results. Label estimates and training; do not turn shared work into sole ownership.')
-                        role_ids = st.multiselect('Where did you do this?', [j.id for j in career.employments],
-                            format_func=lambda ident: next(f'{j.employer} — {j.official_title}' for j in career.employments if j.id == ident), key='roles_' + job_hash[:12] + q.id)
-                        tool = st.text_input('Tool or technology (optional)', key='tool_' + job_hash[:12] + q.id)
-                        usage = st.text_input('How you used it', key='usage_' + job_hash[:12] + q.id)
-                        context = st.selectbox('Experience context', ['professional', 'portfolio', 'academic', 'training'], key='context_' + job_hash[:12] + q.id)
-                        ownership = st.selectbox('Scope of involvement', ['contributed', 'owned', 'familiarity'], key='ownership_' + job_hash[:12] + q.id)
-                        if st.form_submit_button('Save answer'):
-                            try:
-                                if choice == 'Add experience':
-                                    updated = add_gap_answer(career, q, answer, role_ids=role_ids, tool=tool, usage=usage,
-                                        context=context, ownership=ownership, confirmed=True, jd_hash=job_hash)
-                                    st.session_state.career = updated.model_dump(mode='json')
-                                store.event(intake_id, 'follow_up', {'requirement_id': q.id, 'answer': answer if choice == 'Add experience' else choice, 'kind': 'evidence' if choice == 'Add experience' else 'gap'})
-                                st.rerun()
-                            except ValueError as exc:
-                                validation_message(exc)
+                    choice = st.radio('Do you have relevant experience?', ['Add experience', 'No relevant experience', 'Decide later'], key='choice_' + job_hash[:12] + q.id)
+                    answer = st.text_area('What did you personally do?', key='answer_' + job_hash[:12] + q.id,
+                        help='Include scope and actual results. Label estimates and training; do not turn shared work into sole ownership.')
+                    role_ids = st.multiselect('Where did you do this?', [j.id for j in career.employments],
+                        format_func=lambda ident: next(f'{j.employer} — {j.official_title}' for j in career.employments if j.id == ident), key='roles_' + job_hash[:12] + q.id)
+                    tool = st.text_input('Tool or technology (optional)', key='tool_' + job_hash[:12] + q.id)
+                    usage = st.text_input('How you used it', key='usage_' + job_hash[:12] + q.id)
+                    context = st.selectbox('Experience context', ['professional', 'portfolio', 'academic', 'training'], key='context_' + job_hash[:12] + q.id)
+                    ownership = st.selectbox('Scope of involvement', ['contributed', 'owned', 'familiarity'], key='ownership_' + job_hash[:12] + q.id)
+                    if st.form_submit_button('Save answer'):
+                        try:
+                            if choice == 'Add experience':
+                                updated = add_gap_answer(career, q, answer, role_ids=role_ids, tool=tool, usage=usage,
+                                    context=context, ownership=ownership, confirmed=True, jd_hash=job_hash)
+                                st.session_state.career = updated.model_dump(mode='json')
+                            store.event(intake_id, 'follow_up', {'requirement_id': q.id, 'answer': answer if choice == 'Add experience' else choice, 'kind': 'evidence' if choice == 'Add experience' else 'gap'})
+                            st.rerun()
+                        except ValueError as exc:
+                            validation_message(exc)
 
     st.subheader('2. Choose how to create your draft')
     mode = st.radio('Generation mode', ['Practice with mock models', 'Use OpenAI', 'Use Anthropic'], horizontal=True,
@@ -312,7 +305,7 @@ with apply_tab:
         cycles = st.number_input('Maximum revision cycles', 0, 3, 2)
         token_budget = st.number_input('Token budget', min_value=1000, value=250000)
         output_limit = st.number_input('Maximum output tokens per call', min_value=256, max_value=16000, value=6000, help='Separate from the total budget. A truncated response can require a larger per-call allowance.')
-        call_budget = st.number_input('Call budget (includes retry reservations)', min_value=1, max_value=100, value=48)
+        call_budget = st.number_input('Call budget (includes actual retries)', min_value=1, max_value=100, value=48)
     with st.expander('Provider readiness'):
         for label, selected_provider in [('Generator', generator), ('Reviewer', reviewer)]:
             present = not configuration_problem(selected_provider)
@@ -325,8 +318,10 @@ with apply_tab:
                 store.event('readiness', 'synthetic_provider_test', result)
                 (st.success if result['status'] == 'passed' else st.error)(label.title() + ': ' + result['message'])
         plan = budget_plan(Settings(max_revisions=cycles, max_calls=call_budget, token_budget=token_budget, max_output_tokens=output_limit))
-        st.write(f"Up to {plan['normal_calls']} stage calls across the selected revision cycles; up to {plan['with_contract_corrections']} with reviewer corrections, before transient retries. Early stopping and cache hits may reduce this.")
-        st.caption('Before each request, the pipeline reserves a conservative input-byte estimate plus the output limit and affordable retry capacity. Successful requests settle to reported token usage. A total budget can stop a run even when earlier calls succeeded; it is never raised automatically.')
+        st.write(f"With one evidence batch per review: {plan['normal_calls']} stage calls across the selected revision cycles, or {plan['with_contract_corrections']} with reviewer corrections. Longer documents use additional small evidence-review batches; truncated batches split automatically. All requests remain subject to your call and token budgets. Early stopping and cache hits reduce usage.")
+        st.caption('Before each request, the pipeline reserves an input-token estimate with a safety margin, the output limit and affordable retry capacity. OpenAI uses its tokenizer when available; other models or unavailable tokenizer assets use a conservative byte estimate. Successful requests settle to reported token usage. A total budget can stop a run even when earlier calls succeeded; it is never raised automatically.')
+    if generator != 'mock' or reviewer != 'mock':
+        st.caption(f'Generator: {generator_model} · Reviewer: {reviewer_model}. Per-application limits: {call_budget} requests, {token_budget:,} tokens, {cycles} revision cycles. These are usage limits, not a dollar quote. Change them in Writing style & advanced settings.')
     problems = [message for p in set((generator, reviewer)) if (message := configuration_problem(p))]
     missing_jobs = missing_source_jobs(career)
     if missing_jobs:
@@ -379,7 +374,9 @@ with review_tab:
             st.error('The saved evidence snapshot is unavailable. Rerun before approval or export.')
         if m['versions'] and snapshot:
             if 'restored_from_version' in m['versions'][-1]:
-                st.info(f"Restored version {m['versions'][-1]['restored_from_version'] + 1} because later edits introduced review errors. The rejected version remains in review history.")
+                reason = ('the remaining budget could not cover the latest revision review'
+                          if m.get('budget_stop') else 'later edits introduced review errors')
+                st.info(f"Restored reviewed version {m['versions'][-1]['restored_from_version'] + 1} because {reason}. All attempted versions remain in review history.")
             packet = Packet.model_validate(m['versions'][-1]['packet'])
             resume, letter = preview(packet, snapshot)
             requirements = [Requirement.model_validate(q) for q in m.get('requirements', [])]
@@ -415,6 +412,8 @@ with review_tab:
                 labels = {'direct': 'Direct evidence', 'transferable': 'Transferable experience', 'unsupported': 'Experience gap', 'needs_clarification': 'Needs clarification'}
                 index = {e.id: e for e in snapshot.evidence}
                 for q in m.get('requirements', []):
+                    if q.get('kind') == 'constraint':
+                        continue
                     with st.expander(f"{labels[q['classification']]} · {q['text']}"):
                         st.caption(q['priority'].title())
                         st.write(q['excerpt'])
@@ -423,7 +422,10 @@ with review_tab:
                                 st.write('**' + index[ident].project + '**')
                                 for text in index[ident].supported_wording:
                                     st.write(text)
+                practical_ids = {q['id'] for q in m.get('requirements', []) if q.get('kind') == 'constraint'}
                 for question in m.get('discovery_questions', []):
+                    if question['requirement_id'] in practical_ids:
+                        continue
                     saved = m.get('follow_up_answers', {}).get(question['requirement_id'])
                     st.info(question['excerpt'] + '\n\n' + ('Your saved answer: ' + saved['answer'] if saved else question['prompt']))
             with st.expander('Evidence behind each passage'):

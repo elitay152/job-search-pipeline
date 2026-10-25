@@ -38,7 +38,7 @@ def review_report(manifest, career):
             'disabled': 'disabled by configuration', 'not_assessed_practice': 'not assessed for practice output',
             'not_recorded': 'not recorded for this older run'}.get(quality_status, quality_status)]
         for role, receipt in version.get('reviews', {}).items():
-            lines += [f"{role}: {receipt['status']} ({receipt['provider']})"]
+            lines += [f"{role}: {receipt['status']} ({receipt.get('provider', manifest.get('settings', {}).get('reviewer', 'not recorded'))})"]
             for attempt in receipt.get('attempts', []):
                 if attempt['status'] == 'rejected':
                     lines += [f"Response contract rejected: {attempt['error']} (retained in run manifest)."]

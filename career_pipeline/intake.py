@@ -61,6 +61,11 @@ def statements_from_facts(facts):
     if facts.get('metric'):
         metric = facts['metric']
         description = facts.get('scope') or metric.get('basis') or 'Recorded measure'
+        meaning = metric.get('meaning', 'unspecified')
+        if meaning == 'unspecified' and 'reduction' in str(facts.get('comparison', {}).get('interpretation', '')).lower():
+            meaning = 'reduction'
+        if meaning in ('reduction', 'increase'):
+            description = meaning.title() + ' — ' + description
         qualifier = metric.get('qualifier', '')
         result.append(f"{description}: {qualifier} {metric['value']:g} {metric['unit']}.".replace(':  ', ': '))
     if facts.get('activity'):

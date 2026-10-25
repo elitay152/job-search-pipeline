@@ -52,7 +52,7 @@ def test_actual_review_revision_and_export(career, store, tmp_path):
     assert m['revision_count'] == 1
     assert len(m['versions']) == 2 and not m['approved']
     first, final = m['versions']
-    assert {'thin_role','missing_skills','missing_section_content'} <= {f['code'] for f in first['findings']}
+    assert {'thin_role','missing_skills'} <= {f['code'] for f in first['findings']}
     for version in m['versions']:
         assert set(version['reviews']) == {'evidence','recruiter','voice'}
         assert all(x['status']=='passed' for x in version['reviews'].values())
@@ -92,7 +92,7 @@ def test_reviewer_error_is_not_waived(monkeypatch, career, store):
     def provider(self, task, payload, model):
         result = original(self, task, payload, model)
         if task=='review' and payload['role']=='evidence':
-            result['findings'].append({'role':'evidence','claim_id':payload['packet']['resume'][0]['id'],
+            result['findings'].append({'role':'evidence','claim_id':(payload['packet']['resume']+payload['packet']['cover_letter'])[0]['id'],
                 'severity':'error','code':'ambiguous_scope','message':'Clarify source scope.'})
         return result
     monkeypatch.setattr(MockProvider,'complete',provider)
@@ -158,7 +158,7 @@ def test_anthropic_sdk_contract_without_network(monkeypatch):
         result=AnthropicProvider().complete('review',{'role':role,'style':'APPROVED_GUIDANCE','packet':{}},'synthetic-reviewer')
         assert result['input_tokens']==30 and result['output_tokens']==20
     assert len(calls)==3
-    assert 'adversarial evidence auditor' in calls[0]['system']
+    assert 'evidence auditor checking' in calls[0]['system']
     assert 'skeptical recruiter' in calls[1]['system']
     assert 'voice editor' in calls[2]['system']
     assert all('APPROVED_GUIDANCE' not in c['messages'][0]['content'] for c in calls)
@@ -242,13 +242,14 @@ def test_live_assessed_paraphrase_uses_quotes_and_independent_guards(career,stor
     def fake_live(self,task,payload,model,max_tokens=6000):
         packet=Packet.model_validate(payload['packet'])
         result={'findings':[],'reviewed_claim_ids':[c.id for c in packet.resume+packet.cover_letter],
-                'assessments':[assessment(c,career.evidence[0].supported_wording[0]) for c in packet.resume+packet.cover_letter]
+                'assessments':[assessment(c,next(e.supported_wording[0] for e in career.evidence if e.id == c.evidence_ids[0]), c.evidence_ids[0]) for c in packet.resume+packet.cover_letter]
                     if payload['role']=='evidence' else []}
         return {'result':result,'input_tokens':100,'output_tokens':100}
     monkeypatch.setattr(AnthropicProvider if provider=='anthropic' else OpenAIProvider,'complete',fake_live)
     m=run(JD,career,store,Settings(reviewer=provider,factual_mode='model_reviewed',max_revisions=0),seed_packet=seed)
     assert not m['validation']
     assert len(m['versions'][0]['support_assessments'])==2
+    assert len(m['versions'][0]['reviews']['evidence']['deterministic_claim_ids'])==2
     assert m['status']=='draft'  # Presentation objections remain, but semantic support isn't faked as exact equality.
     approve(store,m['id'],career,True)
     assert store.get(m['id'])['approved']
@@ -324,7 +325,7 @@ def test_live_review_contract_correction_is_bounded_and_saved(monkeypatch,career
         if task=='review' and payload['role']=='evidence':
             calls.append(payload)
             if persistent or len(calls)==1:
-                result['reviewed_claim_ids']=[c['id'] for c in payload['packet']['resume']]
+                result['reviewed_claim_ids']=result['reviewed_claim_ids'][:-1]
         return {'result':result,'input_tokens':100,'output_tokens':50}
     monkeypatch.setattr(OpenAIProvider,'complete',complete)
     settings=Settings(generator='openai',reviewer='openai',max_revisions=0)
@@ -336,13 +337,13 @@ def test_live_review_contract_correction_is_bounded_and_saved(monkeypatch,career
     else:
         m=run(JD,career,store,settings)
         assert m['versions'][0]['reviews']['evidence']['status']=='passed'
-    assert len(calls)==2
+    assert len(calls)==(2 if persistent else 4)
     assert 'contract_correction' in calls[1]
     attempts=m['versions'][0]['reviews']['evidence']['attempts']
     assert attempts[0]['status']=='rejected'
     assert attempts[0]['response']['reviewed_claim_ids']
     assert attempts[1]['status']==('rejected' if persistent else 'accepted')
-    assert len([t for t in m['telemetry'] if t.get('role')=='evidence'])==2
+    assert len([t for t in m['telemetry'] if t.get('role')=='evidence'])==len(calls)
 
 
 def test_live_negative_verdict_is_not_retried_or_waived(monkeypatch,career,store):
@@ -350,13 +351,14 @@ def test_live_negative_verdict_is_not_retried_or_waived(monkeypatch,career,store
     def complete(self,task,payload,model,max_tokens=6000):
         result=MockProvider().complete(task,payload,model)
         if task=='review' and payload['role']=='evidence':
-            result['findings'].append({'role':'evidence','claim_id':payload['packet']['resume'][0]['id'],
+            result['findings'].append({'role':'evidence','claim_id':(payload['packet']['resume']+payload['packet']['cover_letter'])[0]['id'],
                 'severity':'error','code':'unsupported_scope','message':'Scope is unsupported.'})
         return {'result':result,'input_tokens':100,'output_tokens':50}
     monkeypatch.setattr(OpenAIProvider,'complete',complete)
     m=run(JD,career,store,Settings(generator='openai',reviewer='openai',max_revisions=0))
     assert m['status']=='needs_review'
-    assert len(m['versions'][0]['reviews']['evidence']['attempts'])==1
+    assert all(a['status']=='accepted' for a in m['versions'][0]['reviews']['evidence']['attempts'])
+    assert len(m['versions'][0]['reviews']['evidence']['attempts']) == len(m['versions'][0]['reviews']['evidence']['batches'])
     with pytest.raises(ValueError):approve(store,m['id'],career,True)
 
 

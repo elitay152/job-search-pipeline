@@ -132,3 +132,100 @@ cover punctuation, multiline headers, invalid line IDs, correction bounds and pr
 
 Final local checks: 142 tests passed on Linux, and `git diff --check` passed. Windows CI is pending
 on the pushed branch. The corrected private backup was pushed separately from application code.
+
+## Bounded evidence-review responses
+
+Live evidence review now uses groups of at most four claims (smaller with a lower per-call
+output cap). A truncated group splits into two, down to a single claim; incomplete results
+never authorize export. Each group retains its cited source records and undergoes the existing
+review contract checks. Combined receipts must cover the complete resume and letter. Recruiter
+and voice editors still see the whole document. Batch statuses and accepted responses are saved
+in the review history; all calls remain subject to the configured budgets and stage cache.
+Successful provider calls consume actual request counts, not their unused transient-retry allowance.
+Unknown failed-attempt token usage is still conservatively reserved.
+
+The evidence auditor receives the active factual policy explicitly and does not receive professional
+writing-style instructions. In model-reviewed mode, semantic equivalence is permitted without
+weakening metric, scope, technology, source-quote or date checks. An initial live paraphrase check
+exposed over-rejection of equivalent verbs; the final prompt separates this from strict copying.
+
+Validation: 149 tests passed on Linux, including synthetic truncation/splitting, complete receipts,
+single-claim failure, approval blocking, persistent negative findings and call-budget exhaustion.
+A live GPT-4.1 review of a seeded synthetic packet (12 resume claims and three letter claims)
+completed four evidence batches plus recruiter/voice reviews. The final paraphrase check returned
+15 assessments, zero factual validation errors, and draft status in 13.3 seconds, using 24,325
+reported tokens. This tested live review, not new document generation, a human writing-quality
+benchmark, Windows execution, or a new live Anthropic run. No personal career data was sent in
+these checks. The earlier practical-constraint follow-up removal is included in this branch.
+
+## Real-resume acceptance check — incomplete final live verification
+
+On 2026-10-25, testing used the user's uploaded master DOCX, previously corrected private career
+history, approved writing profile, and a real pasted job description. No personal documents or
+career facts are included in the public fixtures or this report.
+
+The actual Streamlit upload control saved all seven source jobs with bullets, and a fresh app
+session reloaded the history. Full live OpenAI runs were then exercised through Create my draft,
+Review & download, and Prepare documents. DOCX files were opened with python-docx and checked for
+source job headings, education, publications, draft labels, and absence of internal evidence IDs.
+Several earlier runs completed, but manual reading found errors not caught by the initial automated
+checks. Therefore those runs are not treated as final acceptance of the revised implementation.
+
+Issues found and addressed:
+- Excessive duplicated source context and input-byte token reservations exhausted otherwise usable
+  budgets. Shared context is now losslessly referenced; OpenAI token estimates use its tokenizer.
+- Reviewers retyped quotations incorrectly. They now select numbered literal source excerpts; the
+  backend resolves text and shared-source links without inventing quotes.
+- Unchanged user-supplied facts were unnecessarily re-questioned. Exact source comparisons and
+  model-reviewed paraphrases now have separate receipts. Unknown ownership is not a negation of
+  explicit source actions.
+- Shared employment accomplishments were printed twice; education/publication anchors could be
+  dropped or rewritten. Rendering now preserves the baseline and groups same-employer shared work.
+- A reduction became a usage level, and one uncertainty qualifier was applied to a different metric.
+  Metric meaning and number-specific qualifiers now have deterministic regression checks.
+- Revisions could introduce new errors into passed passages. Source-backed restoration is recorded;
+  a later budget stop can return a previously fully reviewed packet, never an unreviewed revision.
+- Unicode punctuation was repeatedly escaped through model input. Source text now uses Unicode JSON;
+  canonical education/publication text is restored from input before review. Invalid XML characters
+  still block approval and are visibly replaced only in labeled draft exports.
+- Known factual errors are repaired before paid reviews. A skipped-review receipt no longer crashes
+  the readable report.
+
+Latest live attempt: both DOCX download controls worked with no Streamlit exception, but the final
+review was interrupted by OpenAI HTTP 429 / `credit_balance_exhausted` (`insufficient_quota`).
+Further live calls were stopped. No personal packet was marked approved. The final code includes
+an additional tested guard that does not retry exhausted-credit responses. This final code has NOT
+completed a new full live run after that provider limit. The application is not declared fully ready
+on the strength of unit tests alone. The exact generated drafts and unresolved editorial findings
+are stored only in the user's private repository.
+
+Final local checks: 166 tests passed on Linux; `git diff --check` passed. Tests use synthetic data
+and do not download tokenizer assets. Tokenizer and regex dependency metadata support Python 3.11.
+Windows execution, live Anthropic calls, browser file-save behavior on the user's machine, and Word/
+PDF visual pagination were not verified here. LibreOffice is unavailable. Live testing consumed API
+credits; exact charges are unavailable because pricing was not configured in the run settings.
+
+### Follow-up without paid requests (2026-10-25)
+
+The remaining saved draft was replayed against local checks. All three saved versions now
+flag CI/CD authorship inferred from deployment use, and training topics inferred from unrelated
+optimization/deployment work. These checks run before model review and during assessment validation;
+rewriting the statements does not waive source support. Generation instructions also distinguish
+these scopes and request concise bullets and connected cover-letter paragraphs.
+
+A new Streamlit acceptance test uses the actual OpenAI SDK with a synthetic HTTP transport. It
+exercises Create my draft, correction of unsupported initial claims, truncation and batch splitting,
+all three review roles, draft preparation, explicit approval, and final resume/letter DOCX output.
+Both final documents contain the intended corrected text and no DRAFT label or evidence IDs. A
+fresh UI session keeps saved history without another provider request. This verifies application
+behavior with simulated responses; it does not measure a live model's writing quality.
+
+The suite blocks real HTTPX transports and tokenizer downloads, so an accidentally unmocked model
+call fails locally rather than charging the account. Local result: **177 passed**, Linux;
+`git diff --check` passed. No live provider requests were made in this follow-up. Model names and
+per-application request/token/revision limits are visible beside the draft action. Those limits
+are not a dollar estimate or a global account spending cap.
+
+The earlier live acceptance limitation still applies. Windows execution and visual Word/PDF
+pagination remain unverified. Changes are prepared for merging; no new personal packet has been
+approved and the old draft artifacts remain explicitly unapproved.

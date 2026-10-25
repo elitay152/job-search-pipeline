@@ -14,9 +14,30 @@ TOOLS = ('python','pyspark','snowflake','sql server','databricks','power bi','db
 
 def numbers(text):
     clean = text.lower().replace(',', '')
-    # Compare common K/M renderings without allowing newly annualized/multiplied outcomes.
-    return {float(n) * {'k':1000, 'm':1000000, '':1}[unit] for n,unit in
-            re.findall(r'(?<![\w])([0-9]+(?:\.[0-9]+)?)\s*([km]?)(?![\w])', clean)}
+    # Normalize readable magnitude words and scientific notation without changing values.
+    pattern = r'(?<![\w.])([0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)\s*(thousand|million|billion|[kmb])?(?!\w)'
+    factors = {'k':1000, 'thousand':1000, 'm':1000000, 'million':1000000,
+               'b':1000000000, 'billion':1000000000, '':1}
+    return {float(n) * factors[unit] for n, unit in re.findall(pattern, clean)}
+
+
+def qualified_number(text, value, qualifier):
+    """Bind uncertainty to this number, not another metric later in the paragraph."""
+    clean = text.lower().replace(',', '')
+    pattern = r'(?<![\w.])([0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)\s*(thousand|million|billion|[kmb])?(?!\w)'
+    factors = {'k':1000, 'thousand':1000, 'm':1000000, 'million':1000000,
+               'b':1000000000, 'billion':1000000000, '':1}
+    previous_end = 0
+    found = []
+    for match in re.finditer(pattern, clean):
+        if float(match[1]) * factors[match[2] or ''] == value:
+            prefix = clean[max(previous_end, match.start()-100):match.start()]
+            # Accept an explicit parenthetical qualifier immediately following the value/unit.
+            suffix = clean[match.end():match.end()+50]
+            found.append(bool(re.search(r'\b(' + qualifier + r')\b', prefix)
+                or re.match(r'\s*(?:[a-z/-]+\s*){0,2}\((' + qualifier + r')\)', suffix)))
+        previous_end = match.end()
+    return all(found) if found else bool(re.search(r'\b(' + qualifier + r')\b', clean))
 
 
 def source_text(e):
@@ -25,10 +46,49 @@ def source_text(e):
                       ' '.join(t.name + ' ' + t.usage for t in e.technologies)])
 
 
+
+def delivery_scope_objections(text, linked):
+    """Check two common scope upgrades without treating tool co-occurrence as support.
+
+    A deployment through CI/CD does not establish workflow authorship. A training
+    topic must occur in a source training statement, not elsewhere in the project.
+    These deliberately narrow checks complement the semantic review.
+    """
+    source = '\n'.join(source_text(e) for e in linked).lower()
+    low = text.lower()
+    issues = []
+    authoring = (r'\b(?:implement(?:ed|ing)?|build(?:ing)?|built|creat(?:ed|ing)|'
+                 r'design(?:ed|ing)?|author(?:ed|ing)?|develop(?:ed|ing)?)\b'
+                 r'[^.;\n]{0,65}\b(?:ci/cd|ci-cd|continuous integration|github actions)'
+                 r'(?:\s+(?:pipelines?|workflows?))?')
+    def asserts_authorship(value):
+        return any(not re.search(r'\b(?:through|via|using|with)\b', match[0])
+                   for match in re.finditer(authoring, value))
+    if asserts_authorship(low) and not asserts_authorship(source):
+        issues.append('deployment use upgraded to CI/CD authorship')
+    # Restrict the check to explicit peer/colleague training and explicit topics.
+    training = (r'\b(?:train(?:ed|ing)?|taught|teach(?:ing)?)\b'
+                r'[^.;\n]{0,60}\b(?:colleagues?|peers?|coworkers?|team members?)\b'
+                r'[^.;\n]{0,15}\b(?:on|in|about)\s+([^.;\n]+)')
+    topic_groups = {
+        'deployment': r'\bdeploy\w*\b',
+        'optimization': r'\boptimi[sz]\w*\b',
+        'security': r'\bsecur\w*\b',
+        **{tool: r'(?<![a-z0-9])' + re.escape(tool) + r'(?![a-z0-9])' for tool in TOOLS},
+    }
+    source_topics = ' '.join(re.findall(training, source) +
+        re.findall(r'\bpeer training\s+(?:on|in|about)\s+([^.;\n]+)', source))
+    for topics in re.findall(training, low):
+        for label, pattern in topic_groups.items():
+            if re.search(pattern, topics) and not re.search(pattern, source_topics):
+                issues.append('unestablished peer-training topic: ' + label)
+    return issues
+
+
 def deterministic_objections(text, linked):
     source = '\n'.join(source_text(e) for e in linked)
     low, original = text.lower(), source.lower()
-    issues = []
+    issues = delivery_scope_objections(text, linked)
     if not numbers(text) <= numbers(source):
         issues.append('new or altered number')
     for tool in TOOLS:
@@ -78,15 +138,25 @@ def deterministic_objections(text, linked):
         if e.fact_details.get('metric'):
             metrics.append(e.fact_details['metric'])
         for m in metrics:
+            meaning = m.get('meaning', 'unspecified')
+            interpretation = str(e.fact_details.get('comparison', {}).get('interpretation', '')).lower()
+            if meaning == 'unspecified' and 'reduction' in interpretation:
+                meaning = 'reduction'
+            if meaning == 'reduction' and m['value'] in numbers(text):
+                value = re.escape(f"{m['value']:g}")
+                if (not re.search(r'\b(reduc\w*|decreas\w*|lower\w*|fewer|sav\w*|drop\w*)\b', low)
+                    or re.search(r'\b(?:to|at)\s+(?:approximately\s+|about\s+|roughly\s+)?' + value + r'\b', low)):
+                    issues.append('reduction presented as a usage level')
             relevant = m['value'] in numbers(text) or bool(re.search(r'\b(saved|savings|reduced|reduction|improved)\b', low))
             if not relevant:
                 continue
-            if m.get('qualifier') in ('estimated','approximately') and not re.search(r'\b(estimated|approximately|about|roughly)\b', low):
+            if m.get('qualifier') in ('estimated','approximately') and not qualified_number(text, m['value'], 'estimated|approximately|approx|about|roughly'):
                 issues.append('lost estimated/approximate qualifier')
-            if m.get('qualifier') == 'expected' and 'expected' not in low:
+            if m.get('qualifier') == 'expected' and not qualified_number(text, m['value'], 'expected'):
                 issues.append('expected outcome presented as realized')
     for verb in ('owned','led','managed','supervised','directed','architected'):
-        if re.search(r'\b' + verb + r'\b', low) and not re.search(r'\b' + verb + r'\b', original):
+        verb_pattern = r'\b' + verb + (r'\b(?!\s+to\b)' if verb == 'led' else r'\b')
+        if re.search(verb_pattern, low) and not re.search(r'\b' + verb + r'\b', original):
             if verb != 'owned' or not any(e.ownership == 'owned' for e in linked):
                 issues.append('unestablished ownership verb: ' + verb)
     if re.search(r'\b(doctor|doctorate|doctoral|phd)\b', low) and re.search(r'in progress|dissertation phase|enrolled', original) and not re.search(r'in progress|dissertation|enrolled|student|research', low):

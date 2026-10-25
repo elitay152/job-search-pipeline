@@ -63,6 +63,21 @@ def ensure_history_bullets(packet, career):
         used_ids.add(ident)
         result.resume.append(Claim(id=ident, text=source.supported_wording[0], evidence_ids=[source.id]))
         covered.update(evidence_roles(source, baseline))
+    # These are baseline credentials, not discretionary tailoring decisions.
+    anchors = {c.evidence_ids[0]: c.id for c in result.resume if len(c.evidence_ids) == 1
+               and c.evidence_ids[0] in index and index[c.evidence_ids[0]].kind in ('education','publication')}
+    result.resume = [c for c in result.resume if not (c.evidence_ids and c.evidence_ids[0] in index
+                     and index[c.evidence_ids[0]].kind in ('education','publication'))]
+    used_ids = {c.id for c in result.resume + result.cover_letter}
+    for source in career.evidence:
+        include = ((source.kind == 'education' and career.presentation.include_education)
+                   or (source.kind == 'publication' and career.presentation.include_publications))
+        if include and source.eligible:
+            ident = anchors.get(source.id, 'baseline-' + digest(source.id)[:20])
+            while ident in used_ids:
+                ident += '-b'
+            used_ids.add(ident)
+            result.resume.append(Claim(id=ident, text=source.supported_wording[0], evidence_ids=[source.id]))
     return result
 
 
