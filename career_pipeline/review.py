@@ -1,6 +1,7 @@
 """Deterministic factual gate and document-level review, independent of any UI."""
 import re
 from .models import Career, Packet, Finding
+from .text_safety import XML_INVALID
 
 
 def group_key(e):
@@ -36,6 +37,10 @@ def audit(packet, career, grounded_claims=None):
     index = {e.id: e for e in career.evidence}
     findings = []
     for claim in packet.resume + packet.cover_letter:
+        if XML_INVALID.search(claim.text):
+            findings.append(Finding(role='evidence', claim_id=claim.id, evidence_ids=claim.evidence_ids,
+                severity='error', code='invalid_document_character',
+                message='Passage contains a control character that Word cannot store. Rewrite it from the cited evidence using ordinary text; preserve the facts.'))
         linked = [index[i] for i in claim.evidence_ids if i in index]
         valid = len(linked) == len(claim.evidence_ids) and all(
             e.eligible and claim.text in e.supported_wording for e in linked)

@@ -21,6 +21,17 @@ class Store:
         ''')
         self.db.commit()
 
+    def close(self):
+        """Release the SQLite file handle; transaction contexts alone do not close it."""
+        self.db.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+        return False
+
     def save(self, manifest):
         self.db.execute('INSERT OR REPLACE INTO runs VALUES (?,?)', (manifest['id'], json.dumps(manifest)))
         self.db.commit()

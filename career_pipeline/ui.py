@@ -11,11 +11,12 @@ from pydantic import ValidationError
 from career_pipeline.models import Career, Evidence, Employment, Packet, Settings, DEFAULT_MODELS
 from career_pipeline.store import Store, digest
 from career_pipeline.pipeline import run
-from career_pipeline.export import approve, export, preview
-from career_pipeline.workbench import save_profile, analyze_job, add_gap_answer, fit_report
+from career_pipeline.export import approve, export, preview, export_pdf
+from career_pipeline.workbench import save_profile, analyze_job, add_gap_answer, fit_report, application_label
 from career_pipeline.job_input import load_job_url
-from career_pipeline.models import Requirement
+from career_pipeline.models import Requirement, ContentQualitySettings
 from career_pipeline.report import review_report
+from career_pipeline.readiness import app_version, check_provider, budget_plan
 from career_pipeline.ui_errors import configuration_problem, failure_message
 
 
@@ -66,13 +67,14 @@ career = Career.model_validate(st.session_state.career)
 
 with st.sidebar:
     st.header('Workspace')
+    st.caption('App version: ' + app_version())
     st.caption('Personal evidence is saved on this computer. It is not included in the public repository.')
     st.metric('Confirmed evidence', sum(e.eligible for e in career.evidence))
     st.metric('Needs confirmation', sum(not e.eligible for e in career.evidence))
     with st.expander('Try the synthetic example'):
         st.caption('Replaces the current workspace with fictional evidence. Export a backup first if needed.')
         if st.button('Load synthetic example'):
-            save_career(Career.model_validate_json(Path('fixtures/career.json').read_text()))
+            save_career(Career.model_validate_json(Path('fixtures/career.json').read_text(encoding='utf-8')))
             st.rerun()
     with st.expander('Import / backup'):
         upload = st.file_uploader('Import an evidence backup', type=['json'])
@@ -201,6 +203,8 @@ with apply_tab:
     if not career.evidence:
         st.info('First, add your experience in My experience, import a backup, or try the synthetic example in the sidebar.')
     st.subheader('1. Choose the role')
+    company_name = st.text_input('Company (optional)')
+    role_name = st.text_input('Role (optional)')
     with st.expander('Load a job posting link'):
         job_url = st.text_input('Job posting URL', placeholder='https://company.example/careers/data-engineer')
         if st.button('Load posting', disabled=not job_url):
@@ -281,9 +285,27 @@ with apply_tab:
         reviewer_model = st.text_input('Review model', DEFAULT_MODELS[reviewer], key='rm_' + reviewer)
         factual_mode = st.selectbox('Factual checking', ['model_reviewed', 'strict'] if reviewer != 'mock' else ['strict'],
             help='Live-reviewed paraphrases require source quotes and independent factual checks. Strict mode requires exact supported wording.')
+        quality_enabled = st.checkbox('Check writing quality', value=True)
+        minimum_bullet_words = st.number_input('Flag experience bullets shorter than this many words', 0, 30, 4)
+        minimum_letter_words = st.number_input('Preferred minimum cover-letter words (0 disables)', 0, 400, 0)
         cycles = st.number_input('Maximum revision cycles', 0, 3, 2)
         token_budget = st.number_input('Token budget', min_value=1000, value=250000)
+        output_limit = st.number_input('Maximum output tokens per call', min_value=256, max_value=16000, value=6000, help='Separate from the total budget. A truncated response can require a larger per-call allowance.')
         call_budget = st.number_input('Call budget (includes retry reservations)', min_value=1, max_value=100, value=48)
+    with st.expander('Provider readiness'):
+        for label, selected_provider in [('Generator', generator), ('Reviewer', reviewer)]:
+            present = not configuration_problem(selected_provider)
+            st.caption(f'{label}: {selected_provider} · ' + ('no key needed' if selected_provider == 'mock' else 'key configured (not yet verified)' if present else 'key missing'))
+        st.caption('The connection test sends only fictional evidence. Each selected configuration makes one request, capped at 1,500 output tokens; API charges may apply separately from the application budget.')
+        if st.button('Test selected providers with synthetic data'):
+            for label, selected_provider, model in [('generator', generator, generator_model), ('reviewer', reviewer, reviewer_model)]:
+                with st.spinner('Testing ' + label + '…'):
+                    result = check_provider(selected_provider, model, label)
+                store.event('readiness', 'synthetic_provider_test', result)
+                (st.success if result['status'] == 'passed' else st.error)(label.title() + ': ' + result['message'])
+        plan = budget_plan(Settings(max_revisions=cycles, max_calls=call_budget, token_budget=token_budget, max_output_tokens=output_limit))
+        st.write(f"Up to {plan['normal_calls']} stage calls across the selected revision cycles; up to {plan['with_contract_corrections']} with reviewer corrections, before transient retries. Early stopping and cache hits may reduce this.")
+        st.caption('Before each request, the pipeline reserves a conservative input-byte estimate plus the output limit and affordable retry capacity. Successful requests settle to reported token usage. A total budget can stop a run even when earlier calls succeeded; it is never raised automatically.')
     problems = [message for p in set((generator, reviewer)) if (message := configuration_problem(p))]
     for message in problems:
         st.error(message)
@@ -292,9 +314,13 @@ with apply_tab:
             with st.spinner('Matching evidence, writing and reviewing your application…'):
                 m = run(jd, career, store, Settings(generator=generator, reviewer=reviewer, factual_mode=factual_mode,
                     generator_model=generator_model, reviewer_model=reviewer_model, max_revisions=cycles,
-                    token_budget=token_budget, max_calls=call_budget), style_path=style_path)
+                    token_budget=token_budget, max_calls=call_budget, max_output_tokens=output_limit, content_quality=ContentQualitySettings(enabled=quality_enabled,
+                        minimum_bullet_words=minimum_bullet_words, minimum_letter_words=minimum_letter_words)), style_path=style_path, application={'company': company_name, 'role': role_name})
             st.session_state.run_id = m['id']
-            st.success('Your draft is ready. Open Review & download to inspect it.')
+            if m['status'] == 'needs_review':
+                st.warning('The run finished with unresolved findings. Open Review & download to inspect the draft; final export remains blocked when errors remain.')
+            else:
+                st.success('Your draft is ready. Open Review & download to inspect it.')
         except Exception as exc:
             st.error(failure_message(exc))
 
@@ -306,11 +332,18 @@ with review_tab:
         ids = [m['id'] for m in history]
         def run_label(ident):
             item = next(m for m in history if m['id'] == ident)
-            return f"{item['created'][:16].replace('T', ' ')} · {item['status'].replace('_', ' ').title()} · {ident[:8]}"
+            return f"{application_label(item)} · {item['created'][:16].replace('T', ' ')} · {item['status'].replace('_', ' ').title()} · {ident[:8]}"
         selected = st.selectbox('Application', ids, format_func=run_label,
             index=ids.index(st.session_state.get('run_id')) if st.session_state.get('run_id') in ids else 0)
         m = store.get(selected)
+        st.download_button('Download full run audit (JSON)', json.dumps(m, indent=2), 'audit.json', 'application/json', key='audit_' + selected)
+        st.caption(application_label(m))
         st.subheader(m['status'].replace('_', ' ').title())
+        if m.get('failure'):
+            st.error('Stopped at ' + m['failure']['stage'] + ': ' + m['failure']['message'])
+            st.download_button('Download diagnostic summary', json.dumps({'run_id': m['id'], 'failure': m['failure'], 'stages': m['stages']}, indent=2), 'run-diagnostic.json', 'application/json')
+        elif m['status'] == 'failed':
+            st.warning('This older run has no detailed failure diagnostic. Its stages and saved review attempts remain in Technical audit details.')
         st.caption(f"{m['revision_count']} revision cycles · {m.get('latency', 0):.1f} seconds · {m.get('stopping_reason', 'running').replace('_', ' ')}")
         if m['settings']['reviewer'] == 'mock':
             st.warning('Practice output copies evidence statements to test the workflow. It is not a professionally tailored resume. Choose Use OpenAI or Use Anthropic in Create application for composed documents and live reviews.')
@@ -320,6 +353,8 @@ with review_tab:
         except ValueError:
             st.error('The saved evidence snapshot is unavailable. Rerun before approval or export.')
         if m['versions'] and snapshot:
+            if 'restored_from_version' in m['versions'][-1]:
+                st.info(f"Restored version {m['versions'][-1]['restored_from_version'] + 1} because later edits introduced review errors. The rejected version remains in review history.")
             packet = Packet.model_validate(m['versions'][-1]['packet'])
             resume, letter = preview(packet, snapshot)
             requirements = [Requirement.model_validate(q) for q in m.get('requirements', [])]
@@ -337,6 +372,8 @@ with review_tab:
             with letter_tab:
                 st.markdown(letter)
             with notes_tab:
+                quality_status = m['versions'][-1].get('content_quality_status', 'not_recorded')
+                st.caption('Writing-quality checks: ' + quality_status.replace('_', ' ') + '. These are presentation heuristics, not factual certification.')
                 findings_view(m['versions'][-1]['findings'])
                 for version in m['versions']:
                     with st.expander(f"Version {version['number'] + 1} · review history"):
@@ -394,8 +431,44 @@ with review_tab:
             if st.button('Prepare documents', disabled=not draft and not m['approved']):
                 try:
                     st.session_state['downloads'] = [str(p) for p in export(store, selected, snapshot, draft=draft)]
+                    if store.get(selected).get('render_warnings'):
+                        st.warning('Invalid hidden characters were replaced with visible replacement marks in this draft. The audit preserves the original text. Correct or regenerate it before final approval.')
                 except ValueError as exc:
                     validation_message(exc)
+            with st.expander('Optional PDF & layout review'):
+                st.caption(f"Reviewing document version {m['versions'][-1]['number'] + 1}. Requires local LibreOffice; install the layout extra for geometry checks. Rendering does not approve facts or writing.")
+                resume_pages = st.number_input('Preferred maximum resume pages', 1, 10, 2)
+                letter_pages = st.number_input('Preferred maximum cover-letter pages', 1, 5, 1)
+                if st.button('Render PDFs and inspect layout'):
+                    try:
+                        paths = export(store, selected, snapshot, draft=draft)
+                        result = export_pdf(store, selected, paths, max_resume_pages=resume_pages, max_letter_pages=letter_pages)
+                        st.session_state['downloads'] = [str(p) for p in paths] + [d['pdf'] for d in result['documents'] if d.get('pdf')]
+                        st.rerun()
+                    except ValueError as exc:
+                        validation_message(exc)
+                layout = m.get('layout_review')
+                if layout:
+                    st.caption(f"Layout result for version {layout['version'] + 1}: {layout['status']}")
+                    if layout.get('reason'):
+                        st.info(layout['reason'])
+                    for document in layout['documents']:
+                        inspection = document.get('inspection', {})
+                        st.write(Path(document['source']).name + ': ' + str(inspection.get('page_count', 'unknown')) + ' pages')
+                        for warning in inspection.get('warnings', []):
+                            st.warning(warning)
+                        if inspection.get('reason') or document.get('reason'):
+                            st.info(inspection.get('reason') or document['reason'])
+                    st.caption('Open the PDFs to inspect typography, clipping and pagination. Automated checks do not replace your visual review.')
+                    if layout['status'] == 'rendered' and layout['documents']:
+                        visual_ack = st.checkbox('I opened these PDFs and reviewed their layout.', key='layout_ack_' + selected + str(draft))
+                        if st.button('Record visual review', disabled=not visual_ack):
+                            from career_pipeline.layout import confirm_layout
+                            try:
+                                confirm_layout(store, selected)
+                                st.success('Visual review recorded for these exact PDFs. Factual approval is separate.')
+                            except ValueError as exc:
+                                validation_message(exc)
             for path in st.session_state.get('downloads', []):
                 p = Path(path)
                 if selected in str(p) and p.exists() and p.parent.name == ('draft' if draft else 'final'):
@@ -411,7 +484,7 @@ with history_tab:
         st.info('No applications yet. Create your first draft to start a history.')
     for m in history:
         with st.container(border=True):
-            st.write(f"**{m['status'].replace('_', ' ').title()}** · {m['created'][:16].replace('T', ' ')}")
+            st.write(f"**{application_label(m)}** · **{m['status'].replace('_', ' ').title()}** · {m['created'][:16].replace('T', ' ')}")
             cost = m.get('estimated_cost')
             st.caption(f"{m.get('latency', 0):.1f} seconds · {m['revision_count']} revisions · Estimated cost: {f'${cost:.4f}' if cost is not None else 'unavailable'}")
             if st.button('Select for review', key='history_' + m['id']):

@@ -133,7 +133,8 @@ def test_snapshot_and_budget(career, store):
     with pytest.raises(ValueError, match='changed'):
         approve(store, m['id'], career, True)
 
-def test_pdf_graceful():
+def test_pdf_graceful(monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda name: None)
     assert export_pdf()['available'] is False
 
 def test_evaluation(tmp_path):

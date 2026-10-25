@@ -11,3 +11,9 @@ Acceptance:
 - Verify the Windows setup path and distinguish actual Windows tests from Linux checks.
 
 Already merged: adaptive retry budget, missing-key diagnostics, practice warning and approval download refresh.
+
+Follow-up diagnostics implementation: known review-contract failures, incomplete tool results,
+schema-invalid data, budgets and provider errors now have allowlisted explanations. Failed runs
+persist their active stage and safe diagnostic; the UI offers a content-free diagnostic download.
+The output-token limit is exposed independently of the total budget. These diagnostics do not
+claim to resolve an unidentified local failure or replace a synthetic connection test.

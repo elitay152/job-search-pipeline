@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 import re
 import time
 import uuid
@@ -10,6 +11,8 @@ from .store import Store, digest, now
 from .review import audit, reviews, document_plan, group_key
 from .grounding import accepted_assessments
 from .composition import build_composition_plan
+from .content_quality import check_content_quality
+from .diagnostics import failure_details
 
 TOKENS = re.compile(r'[a-z0-9+#]+')
 NAMED_TOOLS = ('sql server', 'azure devops', 'azure data factory', 'azure sql', 'blob storage',
@@ -93,12 +96,12 @@ def map_requirements(requirements, career, retriever=None):
 def load_style(path):
     root = Path(path)
     # Explicitly load the portable skill. Raw examples are never interpolated into instructions.
-    skill = (root/'SKILL.md').read_text()
-    profile = json.loads((root/'profile.json').read_text())
+    skill = (root/'SKILL.md').read_text(encoding='utf-8')
+    profile = json.loads((root/'profile.json').read_text(encoding='utf-8'))
     if not profile.get('approved'):
         raise ValueError('Writing profile must be approved or use the labeled neutral default')
     guidance_file = root/'resume_guidance.md'
-    guidance = guidance_file.read_text() if guidance_file.exists() else ''
+    guidance = guidance_file.read_text(encoding='utf-8') if guidance_file.exists() else ''
     bundle = {'skill': skill, 'profile': profile, 'resume_guidance': guidance}
     return {'version': profile['version'], 'hash': digest(bundle),
             'guidance_version': (re.search(r'Version: (\S+)', guidance).group(1) if re.search(r'Version: (\S+)', guidance) else 'custom') if guidance else None,
@@ -129,13 +132,14 @@ def validate_review_contract(raw, role, packet, requirements, career, factual_mo
     return parsed, receipt
 
 
-def run(jd, career, store=None, settings=None, style_path='writing_style', strategy='C', seed_packet=None):
+def run(jd, career, store=None, settings=None, style_path='writing_style', strategy='C', seed_packet=None, application=None):
     store = store or Store()
     settings = settings or Settings()
     style = load_style(style_path)
     run_id = str(uuid.uuid4())
     started = time.monotonic()
     manifest = {'id': run_id, 'created': now(), 'updated': now(), 'status': 'running',
+        'application': {k: str((application or {}).get(k, '')).strip()[:300] for k in ('company', 'role')},
         'input_hash': digest(jd), 'evidence_hash': digest(career.model_dump(mode='json')),
         'prompt_version': PROMPT_VERSION, 'schema_version': '4', 'style': style,
         'settings': settings.model_dump(), 'strategy': strategy, 'stages': [], 'versions': [],
@@ -146,6 +150,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
     store.save(manifest)
     gateway = Gateway(store, settings)
     def stage(name, function):
+        manifest['active_stage'] = name
         ts = time.monotonic()
         try:
             result = function()
@@ -188,6 +193,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                    'factual_mode': settings.factual_mode}
         packet = seed_packet or stage('generate', lambda: Packet.model_validate(gateway.call('generate', payload)))
         seen = set()
+        last_passing = None
         for revision in range(settings.max_revisions + 1):
             signature = digest(packet.model_dump())
             version = {'number': revision, 'packet': packet.model_dump(), 'findings': [],
@@ -195,7 +201,10 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
             manifest['versions'].append(version)
             manifest['revision_count'] = revision
             store.save(manifest)  # Save even if a reviewer fails before returning.
-            findings = stage('validate', lambda: reviews(packet, requirements, career, plan))
+            quality = (check_content_quality(packet, career, settings.content_quality, plan) if settings.generator != 'mock' else [])
+            version['content_quality_status'] = ('not_assessed_practice' if settings.generator == 'mock' else 'assessed' if settings.content_quality.enabled else 'disabled')
+            version['quality_findings'] = [f.model_dump() for f in quality]
+            findings = stage('validate', lambda: reviews(packet, requirements, career, plan)) + quality
             version['findings'] = [f.model_dump() for f in findings]
             grounded = set()
             if strategy == 'C':
@@ -222,6 +231,8 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                                     request = dict(role_payload, contract_correction={
                                         'error': str(exc),
                                         'claim_ids': [c.id for c in packet.resume + packet.cover_letter],
+                                        'evidence_ids': [e.id for e in career.evidence],
+                                        'requirement_ids': [q.id for q in requirements],
                                         'instruction': 'Return a complete corrected review for your assigned role. This corrects the response contract, never relaxes factual standards.'})
                                 else:
                                     attempts.append({'status': 'accepted', 'response': raw})
@@ -231,7 +242,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                             version['support_assessments'] = raw.get('assessments', [])
                             grounded, rejected = accepted_assessments(packet, career, version['support_assessments'])
                             version['support_rejections'] = rejected
-                            findings = reviews(packet, requirements, career, plan, grounded)
+                            findings = reviews(packet, requirements, career, plan, grounded) + quality
                             for ident, reasons in rejected.items():
                                 findings.append(Finding(role='evidence', claim_id=ident, severity='error',
                                     code='grounding_rejected', message='; '.join(reasons)))
@@ -253,6 +264,19 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
             version['findings'] = list({digest(f.model_dump()): f.model_dump() for f in findings}.values())
             store.event(run_id, 'version', version)
             store.save(manifest)
+            has_errors = any(f['severity'] == 'error' for f in version['findings'])
+            if strategy == 'C' and has_errors and last_passing is not None:
+                restored = deepcopy(last_passing)
+                restored.update(number=len(manifest['versions']), created=now(),
+                                restored_from_version=last_passing['number'])
+                manifest['versions'].append(restored)
+                store.event(run_id, 'version_restored', {'from_version': last_passing['number'],
+                    'rejected_version': version['number'], 'packet_hash': restored['hash']})
+                manifest['stopping_reason'] = 'factual_regression_rollback'
+                store.save(manifest)
+                break
+            if strategy == 'C' and not has_errors:
+                last_passing = deepcopy(version)
             actionable = [f for f in version['findings'] if f['severity'] in ('error', 'suggestion')]
             if strategy != 'C' or not actionable:
                 manifest['stopping_reason'] = 'one_shot' if strategy != 'C' else 'material_issues_resolved'
@@ -281,6 +305,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
     except Exception as exc:
         manifest['status'] = 'failed'
         manifest['error_type'] = type(exc).__name__
+        manifest['failure'] = dict(failure_details(exc), stage=manifest.get('active_stage', 'setup'))
         manifest['stopping_reason'] = 'stage_failure'
         raise
     finally:

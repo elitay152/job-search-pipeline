@@ -2,13 +2,16 @@ name: tests
 on: [push, pull_request]
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.12']
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-      - run: pip install -r requirements.lock
-      - run: pip install --no-deps -e .
-      - run: pytest -q
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev,layout]"
+      - run: python -m pytest -q
       - run: career evaluate --output local/evaluation.json

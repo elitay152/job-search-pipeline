@@ -7,6 +7,14 @@ from .pipeline import audit
 from .store import digest, now
 from .grounding import accepted_assessments
 
+from .text_safety import XML_INVALID
+
+
+def require_clean_final_text(packet, career):
+    if any(XML_INVALID.search(text) for text in preview(packet, career)):
+        raise ValueError('Document text contains invalid control characters. Download a labeled draft and audit for inspection; correct the source or regenerate before final approval.')
+
+
 def resume_title(evidence):
     return (evidence.resume_display_title
             if evidence.resume_display_title and evidence.resume_display_title_approved
@@ -113,6 +121,7 @@ def approve(store, run_id, career, acknowledged=False):
     packet = Packet.model_validate(m['versions'][-1]['packet'])
     if packet_audit(packet, career, m):
         raise ValueError('Factual validation blocks approval')
+    require_clean_final_text(packet, career)
     m.update(status='approved', approved=True, approved_at=now(), approved_packet_hash=digest(packet.model_dump()))
     store.save(m)
     return m
@@ -126,14 +135,23 @@ def export(store, run_id, career, directory='artifacts', draft=False):
         require_review_complete(m)
     if not draft and (packet_audit(packet, career, m) or not m.get('approved') or m.get('approved_packet_hash') != digest(packet.model_dump())):
         raise ValueError('Final export requires passing validation and explicit approval')
+    if not draft:
+        require_clean_final_text(packet, career)
     out = Path(directory)/run_id/('draft' if draft else 'final')
     out.mkdir(parents=True, exist_ok=True)
     paths = []
+    render_warnings = []
     for name, text in zip(('resume', 'cover_letter'), preview(packet, career)):
         if draft:
             text = 'DRAFT — NOT APPROVED\n\n' + text
+        invalid = XML_INVALID.findall(text)
+        if invalid:
+            render_warnings.append({'document': name, 'code': 'invalid_xml_characters', 'count': len(invalid),
+                                    'codepoints': sorted({f'U+{ord(c):04X}' for c in invalid}),
+                                    'action': 'replaced with visible U+FFFD in draft only; source preserved'})
+            text = XML_INVALID.sub('\ufffd', text)
         md = out/f'{name}.md'
-        md.write_text(text)
+        md.write_text(text, encoding='utf-8')
         document = Document()
         section = document.sections[0]
         section.page_width, section.page_height = Inches(8.5), Inches(11)
@@ -158,13 +176,19 @@ def export(store, run_id, career, directory='artifacts', draft=False):
         docx = out/f'{name}.docx'
         document.save(docx)
         paths.extend([md, docx])
+    m['render_warnings'] = render_warnings
     for path in paths:
         m['artifacts'].append({'path': str(path), 'sha256': __import__('hashlib').sha256(path.read_bytes()).hexdigest(),
-                               'draft': draft, 'created': now()})
+                               'draft': draft, 'packet_hash': digest(packet.model_dump()), 'created': now()})
     store.save(m)
     report = out/'audit.json'
-    report.write_text(json.dumps(m, indent=2))
+    report.write_text(json.dumps(m, indent=2), encoding='utf-8')
     return paths + [report]
 
-def export_pdf(*args, **kwargs):
-    return {'available': False, 'reason': 'PDF renderer not installed; use editable DOCX or Markdown.'}
+def export_pdf(store=None, run_id=None, paths=None, **kwargs):
+    if store is None:
+        import shutil
+        return {'available': bool(shutil.which('libreoffice') or shutil.which('soffice')),
+                'reason': 'Local LibreOffice is required for PDF rendering.'}
+    from .layout import render_layout
+    return render_layout(store, run_id, paths, **kwargs)
