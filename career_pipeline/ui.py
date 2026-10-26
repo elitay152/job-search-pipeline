@@ -303,7 +303,7 @@ with apply_tab:
         minimum_bullet_words = st.number_input('Flag experience bullets shorter than this many words', 0, 30, 4)
         minimum_letter_words = st.number_input('Preferred minimum cover-letter words (0 disables)', 0, 400, 0)
         cycles = st.number_input('Maximum revision cycles', 0, 3, 2)
-        token_budget = st.number_input('Token budget', min_value=1000, value=250000)
+        token_budget = st.number_input('Token budget', min_value=1000, value=500000)
         output_limit = st.number_input('Maximum output tokens per call', min_value=256, max_value=16000, value=6000, help='Separate from the total budget. A truncated response can require a larger per-call allowance.')
         call_budget = st.number_input('Call budget (includes actual retries)', min_value=1, max_value=100, value=48)
     with st.expander('Provider readiness'):
@@ -375,7 +375,12 @@ with review_tab:
         if m['versions'] and snapshot:
             if 'restored_from_version' in m['versions'][-1]:
                 reason = ('the remaining budget could not cover the latest revision review'
-                          if m.get('budget_stop') else 'later edits introduced review errors')
+                          if m.get('budget_stop') else
+                          f"a later {m['restored_after_failure']['stage'].replace('_', ' ')} step failed"
+                          if m.get('restored_after_failure') else
+                          'a later review did not complete'
+                          if m.get('stopping_reason') == 'review_unavailable_rollback'
+                          else 'later edits introduced review errors')
                 st.info(f"Restored reviewed version {m['versions'][-1]['restored_from_version'] + 1} because {reason}. All attempted versions remain in review history.")
             packet = Packet.model_validate(m['versions'][-1]['packet'])
             resume, letter = preview(packet, snapshot)

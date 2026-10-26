@@ -194,7 +194,7 @@ class Settings(BaseModel):
     factual_mode: Literal['strict', 'model_reviewed'] = 'strict'
     max_revisions: int = Field(default=2, ge=0, le=3)
     max_calls: int = Field(default=48, ge=1, le=100)
-    token_budget: int = Field(default=250000, ge=1000)
+    token_budget: int = Field(default=500000, ge=1000)  # A full 2-revision run on a real career uses ~350–400k.
     max_output_tokens: int = Field(default=6000, ge=256, le=16000)
     input_usd_per_million: float | None = Field(default=None, ge=0)
     output_usd_per_million: float | None = Field(default=None, ge=0)

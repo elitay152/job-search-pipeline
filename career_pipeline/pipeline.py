@@ -131,6 +131,9 @@ def validate_review_contract(raw, role, packet, requirements, career, factual_mo
             raise ValueError('Reviewer cited unknown evidence')
         if not (f.claim_id or f.section or f.requirement_id):
             raise ValueError('Reviewer finding must identify a passage, section or requirement')
+        if role != 'evidence' and f.severity == 'error':
+            # Presentation reviewers advise; only factual auditing and deterministic checks block approval.
+            f.severity = 'suggestion'
     receipt = set(raw.get('reviewed_claim_ids', []))
     if role == 'evidence' and receipt != known:
         raise ValueError('Evidence reviewer did not account for every claim')
@@ -298,6 +301,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
             version['findings'] = [f.model_dump() for f in findings]
             grounded = set()
             preflight = []
+            advisory = set()  # Model-only recruiter/voice suggestions: shown to the user, never sent to revision.
             if strategy == 'C' and settings.factual_mode == 'model_reviewed':
                 preflight.extend(f for f in findings if f.code == 'invalid_document_character')
                 index = {e.id: e for e in career.evidence}
@@ -383,17 +387,31 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                             for ident, reasons in rejected.items():
                                 findings.append(Finding(role='evidence', claim_id=ident, severity='error',
                                     code='grounding_rejected', message='; '.join(reasons)))
+                        if role != 'evidence':
+                            deterministic = {digest(f.model_dump()) for f in findings} - advisory
+                            advisory.update(key for key in (digest(f.model_dump()) for f in parsed)
+                                            if key not in deterministic)
                         findings.extend(parsed)
                         version['reviews'][role].update(status='passed', findings=[f.model_dump() for f in parsed],
                                                          reviewed_claim_ids=sorted(receipt))
-                    except Exception:
+                    except Exception as exc:
                         version['reviews'][role]['status'] = 'failed'
                         for record in reversed(manifest['stages']):
                             if record['name'] == 'review_' + role:
                                 record['status'] = 'failed'
                                 break
                         store.save(manifest)
-                        raise
+                        if role == 'evidence':
+                            raise
+                        # Presentation advice is optional for a draft: keep the factually reviewed
+                        # packet, and let the approval gate require a rerun that completes this review.
+                        details = failure_details(exc)
+                        version['reviews'][role]['failure'] = details
+                        findings.append(Finding(role=role, section='review', severity='gap', code='review_unavailable',
+                            message=f'The {role} review did not complete ({details["code"]}). '
+                                    'The draft remains available; rerun to complete all reviews before approval.'))
+                        store.event(run_id, 'review_unavailable', {'version': version['number'], 'role': role,
+                                                                   'code': details['code']})
                     # Do not hide document-level objections just because a missing section
                     # has no existing passage or requirement ID.
                     version['findings'] = list({digest(f.model_dump()): f.model_dump() for f in findings}.values())
@@ -402,21 +420,27 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
             store.event(run_id, 'version', version)
             store.save(manifest)
             has_errors = any(f['severity'] == 'error' for f in version['findings'])
-            if strategy == 'C' and has_errors and last_passing is not None:
+            incomplete = strategy == 'C' and not preflight and any(
+                version['reviews'].get(role, {}).get('status') != 'passed' for role in ('evidence', 'recruiter', 'voice'))
+            if strategy == 'C' and (has_errors or incomplete) and last_passing is not None:
                 restored = deepcopy(last_passing)
                 restored.update(number=len(manifest['versions']), created=now(),
                                 restored_from_version=last_passing['number'])
                 manifest['versions'].append(restored)
                 store.event(run_id, 'version_restored', {'from_version': last_passing['number'],
                     'rejected_version': version['number'], 'packet_hash': restored['hash']})
-                manifest['stopping_reason'] = 'factual_regression_rollback'
+                manifest['stopping_reason'] = 'factual_regression_rollback' if has_errors else 'review_unavailable_rollback'
                 store.save(manifest)
                 break
-            if strategy == 'C' and not has_errors and not preflight:
+            if strategy == 'C' and not has_errors and not preflight and not incomplete:
                 last_passing = deepcopy(version)
-            actionable = [f for f in version['findings'] if f['severity'] in ('error', 'suggestion')]
+            # Model-only presentation suggestions often ask for experience the sources do not
+            # establish; revising toward them invites unsupported claims, so they stay with the user.
+            actionable = [f for f in version['findings'] if f['severity'] == 'error'
+                          or (f['severity'] == 'suggestion' and digest(f) not in advisory)]
             if strategy != 'C' or not actionable:
-                manifest['stopping_reason'] = 'one_shot' if strategy != 'C' else 'material_issues_resolved'
+                manifest['stopping_reason'] = ('one_shot' if strategy != 'C' else
+                                               'review_unavailable' if incomplete else 'material_issues_resolved')
                 break
             if revision == settings.max_revisions:
                 manifest['stopping_reason'] = 'revision_limit'
@@ -452,19 +476,23 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
         if settings.factual_mode == 'model_reviewed':
             accepted, _ = accepted_assessments(final_packet, career, final.get('support_assessments', []))
         manifest['validation'] = [f.model_dump() for f in audit(final_packet, career, accepted, include_cover_letter=settings.include_cover_letter)]
-        review_errors = [f for f in final['findings'] if f['severity'] == 'error']
+        review_errors = [f for f in final['findings'] if f['severity'] == 'error'
+                         or f.get('code') == 'review_unavailable']
         manifest['status'] = 'needs_review' if manifest['validation'] or review_errors else 'draft'
         manifest['unresolved_findings'] = final['findings']
     except Exception as exc:
-        if str(exc) == 'provider call/token budget exhausted before request' and last_passing is not None:
+        if last_passing is not None:
             # A later optional revision must not turn an already reviewed packet into
             # an unusable run. Preserve both the unfinished attempt and the restored version.
+            budget = str(exc) == 'provider call/token budget exhausted before request'
             restored = deepcopy(last_passing)
             restored.update(number=len(manifest['versions']), created=now(),
                             restored_from_version=last_passing['number'])
             manifest['versions'].append(restored)
-            manifest['budget_stop'] = dict(failure_details(exc), stage=manifest.get('active_stage', 'setup'))
-            manifest['stopping_reason'] = 'budget_limit_restored_reviewed_version'
+            manifest['budget_stop' if budget else 'restored_after_failure'] = dict(
+                failure_details(exc), stage=manifest.get('active_stage', 'setup'))
+            manifest['stopping_reason'] = ('budget_limit_restored_reviewed_version' if budget
+                                           else 'stage_failure_restored_reviewed_version')
             final_packet = Packet.model_validate(restored['packet'])
             accepted, _ = accepted_assessments(final_packet, career, restored.get('support_assessments', []))
             manifest['validation'] = [f.model_dump() for f in audit(final_packet, career, accepted,
@@ -472,7 +500,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
             manifest['unresolved_findings'] = restored['findings']
             manifest['status'] = 'needs_review' if manifest['validation'] else 'draft'
             store.event(run_id, 'version_restored', {'from_version':last_passing['number'],
-                        'reason':'budget_limit', 'packet_hash':restored['hash']})
+                        'reason':'budget_limit' if budget else 'stage_failure', 'packet_hash':restored['hash']})
         else:
             manifest['status'] = 'failed'
             manifest['error_type'] = type(exc).__name__

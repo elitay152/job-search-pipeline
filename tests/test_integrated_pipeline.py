@@ -108,11 +108,12 @@ def test_review_failure_retains_candidate_and_blocks_approval(monkeypatch, caree
             raise ConnectionError('synthetic failure')
         return original(self,task,payload,model)
     monkeypatch.setattr(MockProvider,'complete',provider)
-    with pytest.raises(ConnectionError):run(JD,career,store)
-    m=store.history()[0]
-    assert m['status']=='failed' and m['versions'][0]['packet']['resume']
+    m=run(JD,career,store)  # A presentation review failure no longer discards the draft.
+    assert m['status']=='needs_review' and m['versions'][0]['packet']['resume']
+    assert m['stopping_reason']=='review_unavailable'
     assert m['versions'][0]['reviews']['evidence']['status']=='passed'
     assert m['versions'][0]['reviews']['voice']['status']=='failed'
+    assert any(f['code']=='review_unavailable' for f in m['unresolved_findings'])
     assert m['estimated_cost'] is None
     with pytest.raises(ValueError):approve(store,m['id'],career,True)
     assert export(store,m['id'],career,tmp_path,draft=True)
@@ -401,8 +402,8 @@ def test_presentation_revision_cannot_replace_passing_packet_with_unsupported_cl
     original = MockProvider.complete
     def provider(self, task, payload, model):
         result = original(self, task, payload, model)
-        if task == 'review' and payload['role'] == 'voice':
-            result['findings'].append({'role': 'voice', 'claim_id': payload['packet']['resume'][0]['id'],
+        if task == 'review' and payload['role'] == 'evidence':
+            result['findings'].append({'role': 'evidence', 'claim_id': payload['packet']['resume'][0]['id'],
                 'severity': 'suggestion', 'code': 'style', 'message': 'Improve clarity without adding facts.'})
         if task == 'revise':
             result['resume'][0]['text'] = 'Managed 500 engineers and saved $900 million.'
@@ -465,3 +466,82 @@ def test_uncertain_employment_is_not_forced_into_resume(career, store):
     assert 'uncertain-role' not in m['selected_evidence']
     assert not any('uncertain-role' in f.get('evidence_ids', [])
                    for f in m['validation'] if f['code'] == 'missing_employment_history')
+
+
+def _suggest_once(original, role):
+    seen = {'count': 0}
+    def provider(self, task, payload, model):
+        result = original(self, task, payload, model)
+        if task == 'review' and payload['role'] == role and not seen['count']:
+            seen['count'] += 1
+            result['findings'].append({'role': role, 'claim_id': payload['packet']['resume'][0]['id'],
+                'severity': 'suggestion', 'code': 'style', 'message': 'Tighten wording.'})
+        return result
+    return provider
+
+
+def test_model_presentation_suggestions_do_not_trigger_revision(monkeypatch, career, store):
+    original = MockProvider.complete
+    def provider(self, task, payload, model):
+        result = original(self, task, payload, model)
+        if task == 'review' and payload['role'] in ('recruiter', 'voice'):
+            result['findings'].append({'role': payload['role'], 'section': 'skills', 'severity': 'suggestion',
+                'code': 'add_git', 'message': 'Add Git experience.'})
+        if task == 'revise':
+            raise AssertionError('advisory suggestions must not reach revision')
+        return result
+    monkeypatch.setattr(MockProvider, 'complete', provider)
+    m = run(JD, career, store)
+    assert m['stopping_reason'] == 'material_issues_resolved' and len(m['versions']) == 1
+    assert sum(f['code'] == 'add_git' for f in m['unresolved_findings']) == 2
+
+
+def test_presentation_reviewer_errors_are_advisory(monkeypatch, career, store):
+    original = MockProvider.complete
+    def provider(self, task, payload, model):
+        result = original(self, task, payload, model)
+        if task == 'review' and payload['role'] == 'recruiter':
+            result['findings'].append({'role': 'recruiter', 'section': 'experience', 'severity': 'error',
+                'code': 'thin_recent_role', 'message': 'Recent role is short.'})
+        return result
+    monkeypatch.setattr(MockProvider, 'complete', provider)
+    m = run(JD, career, store)
+    finding = next(f for f in m['unresolved_findings'] if f['code'] == 'thin_recent_role')
+    assert finding['severity'] == 'suggestion' and m['status'] == 'draft'
+    assert approve(store, m['id'], career, True)['approved']
+
+
+def test_failed_presentation_review_after_revision_restores_reviewed_version(monkeypatch, career, store):
+    calls = {'voice': 0}
+    suggest = _suggest_once(MockProvider.complete, 'evidence')
+    def provider(self, task, payload, model):
+        if task == 'review' and payload['role'] == 'voice':
+            calls['voice'] += 1
+            if calls['voice'] > 1:
+                raise ConnectionError('synthetic failure')
+        result = suggest(self, task, payload, model)
+        if task == 'revise':
+            result['cover_letter'] = result['cover_letter'][::-1]  # A distinct, still-supported candidate.
+        return result
+    monkeypatch.setattr(MockProvider, 'complete', provider)
+    m = run(JD, career, store)
+    assert m['stopping_reason'] == 'review_unavailable_rollback'
+    assert m['versions'][-1]['restored_from_version'] == 0 and m['status'] == 'draft'
+    assert approve(store, m['id'], career, True)['approved']
+
+
+def test_any_later_stage_failure_restores_reviewed_version(monkeypatch, career, store):
+    suggest = _suggest_once(MockProvider.complete, 'evidence')
+    def provider(self, task, payload, model):
+        if task == 'revise':
+            raise ConnectionError('synthetic failure')
+        return suggest(self, task, payload, model)
+    monkeypatch.setattr(MockProvider, 'complete', provider)
+    m = run(JD, career, store)
+    assert m['stopping_reason'] == 'stage_failure_restored_reviewed_version'
+    assert m['restored_after_failure']['stage'] == 'revise'
+    assert m['versions'][-1]['restored_from_version'] == 0 and m['status'] == 'draft'
+
+
+def test_default_budget_covers_a_full_live_run():
+    assert Settings().token_budget >= 400000

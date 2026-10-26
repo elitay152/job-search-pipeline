@@ -80,7 +80,7 @@ def main():
                 factual_mode=args.factual_mode or ('model_reviewed' if args.reviewer != 'mock' else 'strict'),
                 generator_model=args.generator_model,
                 reviewer_model=args.reviewer_model,
-                token_budget=int(os.getenv('TOKEN_BUDGET', '250000')),
+                token_budget=int(os.getenv('TOKEN_BUDGET', '500000')),
                 max_calls=int(os.getenv('CALL_BUDGET', '48')))
             seed = Packet.model_validate_json(Path(args.seed_packet).read_text(encoding='utf-8')) if args.seed_packet else None
             m = run(Path(args.jd).read_text(encoding='utf-8'), career, store, settings, args.style, seed_packet=seed, application={'company': args.company, 'role': args.role})
