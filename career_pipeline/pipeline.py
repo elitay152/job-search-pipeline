@@ -19,6 +19,19 @@ TOKENS = re.compile(r'[a-z0-9+#]+')
 NAMED_TOOLS = ('sql server', 'azure devops', 'azure data factory', 'azure sql', 'blob storage',
                'power bi', 'kubernetes', 'terraform', 'nuget', 'npm', 'mosaic ai', 'unity catalog')
 STOP = {'the','a','an','and','of','to','in','with','for','is','you','we','required','preferred','must','have','experience','using'}
+# Pasted or imported postings often carry the job board's page around them. Boilerplate
+# sections end the requirement list; job-board listings after the posting end extraction.
+POSTING_BOILERPLATE = re.compile(r'^(benefits|perks|what we offer|the company|about (us|the company|[a-z0-9&.,\' -]{2,40})|'
+    r'industry recognition|culture|our (culture|values|mission)|how to apply|equal (employment )?opportunity|'
+    r'commitment equal opportunity.*|eeo statement|compensation|pay transparency)$')
+POSTING_END = re.compile(r'^(people also viewed|similar jobs|show more jobs like this|more jobs like this|'
+    r'referrals increase your chances|seniority level|explore top content|get notified about new)\b')
+PAGE_CHROME = re.compile(r'^(\d+\+? (second|minute|hour|day|week|month|year)s? ago|[\d,]+ open jobs|'
+    r'(sign in|join now|agree & join|email or phone|password|forgot password\??|see who you know|'
+    r'show|save|apply|report this job)\b.*|.*\bsign in\b.*|by clicking continue\b.*|.{1,60} jobs)$')
+# Legal and application boilerplate says "must"/"required" without stating a job requirement.
+POSTING_LEGAL = re.compile(r'\b(equal (employment )?opportunity|protected veterans?|self-identify|vevraa|'
+    r'reasonable accommodations?|essential (duty|duties|functions)|click (on )?the|to apply\b|apply button)')
 
 def words(text):
     return set(TOKENS.findall(text.lower())) - STOP
@@ -33,7 +46,7 @@ def extract(jd):
                 'requirements': 'required', 'experience': 'required', 'education': 'preferred',
                 'preferred experience': 'preferred', 'preferred qualifications': 'preferred',
                 'key responsibilities': 'ambiguous', 'job description': 'ambiguous',
-                'knowledge, skills, and abilities': 'ambiguous'}
+                'knowledge, skills, and abilities': 'ambiguous', 'clearance requirement': 'required'}
     for raw in jd.splitlines():
         excerpt = raw.strip()
         line = re.sub(r'^\s*(?:[-•*]\s+|\d+[.)]\s+)', '', raw).strip()
@@ -49,6 +62,14 @@ def extract(jd):
             priority = 'ambiguous'
             in_requirement_section = False
             continue
+        if POSTING_END.match(low):
+            break
+        if len(line.split()) <= 6 and POSTING_BOILERPLATE.match(low):
+            priority = 'ambiguous'
+            in_requirement_section = False
+            continue
+        if PAGE_CHROME.match(low) or POSTING_LEGAL.search(low):
+            continue
         if re.match(r'^(company|role|source|user-supplied posting url|url retrieval):', low):
             continue
         is_bullet = bool(re.match(r'^\s*(?:[-•*]\s+|\d+[.)]\s+)', raw))
@@ -62,7 +83,8 @@ def extract(jd):
         elif re.search(r'\b(required|must)\b', low):
             local = 'required'
         requirements.append(Requirement(id=f'q{len(requirements)+1}', text=line, excerpt=excerpt,
-            priority=local, kind='constraint' if re.search(r'\b(remote|hybrid|onsite|salary|travel|authorization|location)\b', low) else 'skill'))
+            priority=local, kind='constraint' if re.search(r'\b(remote|hybrid|onsite|salary|travel|authorization|location|'
+                r'citizen|citizenship|green card|permanent resident|clearance|public trust)\b', low) else 'skill'))
     return requirements
 
 class Retriever(Protocol):
