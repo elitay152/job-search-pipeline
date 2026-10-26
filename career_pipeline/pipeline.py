@@ -19,6 +19,7 @@ TOKENS = re.compile(r'[a-z0-9+#]+')
 NAMED_TOOLS = ('sql server', 'azure devops', 'azure data factory', 'azure sql', 'blob storage',
                'power bi', 'kubernetes', 'terraform', 'nuget', 'npm', 'mosaic ai', 'unity catalog')
 STOP = {'the','a','an','and','of','to','in','with','for','is','you','we','required','preferred','must','have','experience','using'}
+GAP_CLASSIFICATIONS = ('unsupported', 'needs_clarification')
 # Pasted or imported postings often carry the job board's page around them. Boilerplate
 # sections end the requirement list; job-board listings after the posting end extraction.
 POSTING_BOILERPLATE = re.compile(r'^(benefits|perks|what we offer|the company|about (us|the company|[a-z0-9&.,\' -]{2,40})|'
@@ -542,7 +543,8 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
 def discovery_questions(requirements):
     questions = []
     for q in requirements:
-        if q.kind == 'constraint' or q.classification == 'direct':
+        # Only real gaps get a question; a transferable match already has evidence to work from.
+        if q.kind == 'constraint' or q.classification not in GAP_CLASSIFICATIONS:
             continue
         prompt = ('Is there relevant experience not yet captured? None is a valid answer. '
                   'If yes, describe where/when, what you personally did, actual tool use, '

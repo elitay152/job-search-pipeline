@@ -244,3 +244,13 @@ def test_extract_ignores_job_board_page_around_posting():
                           'Experience with Terraform or another Infrastructure-as-Code tool.',
                           'US Citizen or Lawful Permanent Resident (Green Card)'}
     assert texts['US Citizen or Lawful Permanent Resident (Green Card)'].kind == 'constraint'
+
+
+def test_follow_up_questions_cover_only_real_gaps():
+    from career_pipeline.models import Requirement
+    from career_pipeline.pipeline import discovery_questions
+    requirements = [Requirement(id=f'q{i}', text=f'Requirement {i}', excerpt=f'Requirement {i}', priority='required',
+                                kind=kind, classification=classification)
+                    for i, (kind, classification) in enumerate([('skill', 'direct'), ('skill', 'transferable'),
+        ('skill', 'unsupported'), ('skill', 'needs_clarification'), ('constraint', 'needs_clarification')])]
+    assert [q['requirement_id'] for q in discovery_questions(requirements)] == ['q2', 'q3']

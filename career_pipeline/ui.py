@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from career_pipeline.models import Career, Evidence, Employment, Packet, Settings, DEFAULT_MODELS
 from career_pipeline.store import Store, digest
-from career_pipeline.pipeline import run
+from career_pipeline.pipeline import run, GAP_CLASSIFICATIONS
 from career_pipeline.export import approve, export, preview, export_pdf
 from career_pipeline.workbench import save_profile, analyze_job, add_gap_answer, fit_report, application_label, user_provided_profile
 from career_pipeline.job_input import load_job_url
@@ -429,7 +429,8 @@ with review_tab:
                                     st.write(text)
                 practical_ids = {q['id'] for q in m.get('requirements', []) if q.get('kind') == 'constraint'}
                 for question in m.get('discovery_questions', []):
-                    if question['requirement_id'] in practical_ids:
+                    # Earlier runs also saved questions for transferable matches.
+                    if question['requirement_id'] in practical_ids or question.get('classification') not in GAP_CLASSIFICATIONS:
                         continue
                     saved = m.get('follow_up_answers', {}).get(question['requirement_id'])
                     st.info(question['excerpt'] + '\n\n' + ('Your saved answer: ' + saved['answer'] if saved else question['prompt']))
