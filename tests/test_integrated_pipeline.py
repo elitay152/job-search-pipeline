@@ -202,8 +202,10 @@ def test_ui_historical_preview_uses_saved_snapshot(monkeypatch,tmp_path):
     next(t for t in app.text_area if t.label=='Paste the job description').set_value((tmp_path/'fixtures/job.txt').read_text()).run(timeout=20)
     next(b for b in app.button if b.label=='Create my draft').click().run(timeout=20)
     assert not app.exception
+    next(r for r in app.radio if r.label=='Go to').set_value('My experience').run(timeout=20)
     next(t for t in app.text_input if t.label=='Name').set_value('Different Synthetic Editor Name')
     next(b for b in app.button if b.label=='Save contact details').click().run(timeout=20)
+    next(r for r in app.radio if r.label=='Go to').set_value('Review & download').run(timeout=20)
     assert not app.exception
     previews='\n'.join(m.value for m in app.markdown)
     assert 'Morgan Example (Synthetic)' in previews

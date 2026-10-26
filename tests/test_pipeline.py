@@ -254,3 +254,10 @@ def test_follow_up_questions_cover_only_real_gaps():
                     for i, (kind, classification) in enumerate([('skill', 'direct'), ('skill', 'transferable'),
         ('skill', 'unsupported'), ('skill', 'needs_clarification'), ('constraint', 'needs_clarification')])]
     assert [q['requirement_id'] for q in discovery_questions(requirements)] == ['q2', 'q3']
+
+
+def test_run_reports_each_stage_for_progress_display(career, store):
+    seen = []
+    run(Path('fixtures/job.txt').read_text(), career, store, on_stage=lambda name, revision: seen.append(name))
+    assert seen[:3] == ['baseline_sources', 'extract', 'retrieve']
+    assert {'generate', 'validate', 'review_evidence', 'review_recruiter', 'review_voice'} <= set(seen)

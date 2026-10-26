@@ -229,7 +229,9 @@ def batched_evidence_review(packet, payload, review_one, output_limit, records):
     return combined
 
 
-def run(jd, career, store=None, settings=None, style_path='writing_style', strategy='C', seed_packet=None, application=None):
+def run(jd, career, store=None, settings=None, style_path='writing_style', strategy='C', seed_packet=None, application=None,
+        on_stage=None):
+    """on_stage(name, revision) is called as each stage starts, for progress display only."""
     store = store or Store()
     settings = settings or Settings()
     style = load_style(style_path)
@@ -248,6 +250,8 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
     gateway = Gateway(store, settings)
     def stage(name, function):
         manifest['active_stage'] = name
+        if on_stage:
+            on_stage(name, manifest['revision_count'])
         ts = time.monotonic()
         try:
             result = function()
