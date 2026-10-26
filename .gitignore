@@ -7,3 +7,4 @@ local/
 artifacts/
 *.sqlite*
 private/
+run-debug*.json

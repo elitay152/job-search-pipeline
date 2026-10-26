@@ -103,8 +103,9 @@ def test_revision_limit_and_factual_gate(monkeypatch, career, store, tmp_path):
 def test_repeated_output_stops(monkeypatch, career, store):
     original = MockProvider.complete
     def provider(self, task, payload, model):
-        if task == 'review' and payload['role'] == 'voice':
-            return {'findings':[{'role':'voice','claim_id':'r1','severity':'suggestion','message':'Make clearer'}]}
+        if task == 'review' and payload['role'] == 'evidence':
+            return {'findings':[{'role':'evidence','claim_id':'r1','severity':'suggestion','message':'Make clearer'}],
+                    'reviewed_claim_ids':[c['id'] for c in payload['packet']['resume'] + payload['packet']['cover_letter']]}
         return original(self, task, payload, model)
     monkeypatch.setattr(MockProvider, 'complete', provider)
     m = run(Path('fixtures/job.txt').read_text(), career, store, Settings(token_budget=100000))
