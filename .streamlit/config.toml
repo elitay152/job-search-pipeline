@@ -1,0 +1,22 @@
+# Workbench theme: calm teal accents on a warm neutral page, with a dark sidebar.
+[theme]
+base = "light"
+primaryColor = "#0F766E"
+backgroundColor = "#FAFAF7"
+secondaryBackgroundColor = "#EEF3F1"
+textColor = "#1F2A30"
+linkColor = "#0E7490"
+borderColor = "#D5DEDB"
+showWidgetBorder = true
+baseRadius = "0.6rem"
+font = "sans-serif"
+
+[theme.sidebar]
+backgroundColor = "#14363B"
+secondaryBackgroundColor = "#1D474D"
+textColor = "#E4EFEC"
+primaryColor = "#5EEAD4"
+borderColor = "#2C5A60"
+
+[client]
+toolbarMode = "minimal"
