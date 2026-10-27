@@ -83,7 +83,7 @@ def test_explicit_existing_key_variable_without_copying(monkeypatch):
 
 def test_provider_defaults_and_mixed_configuration():
     settings=Settings(generator='openai',reviewer='anthropic',factual_mode='model_reviewed')
-    assert settings.generator_model=='gpt-4.1' and settings.reviewer_model=='claude-sonnet-4-5'
+    assert settings.generator_model=='gpt-5-mini' and settings.reviewer_model=='claude-sonnet-4-5'
     assert Settings(reviewer='openai',factual_mode='model_reviewed').reviewer=='openai'
     with pytest.raises(ValidationError):Settings(reviewer='mock',factual_mode='model_reviewed')
 
@@ -154,7 +154,7 @@ def test_gateway_limits_retries_to_remaining_budget(monkeypatch,tmp_path):
     install_transport(monkeypatch,handler)
     monkeypatch.setattr('career_pipeline.providers.input_token_reservation', lambda *args: 12000)
     # A token-based reservation leaves room for only one attempt.
-    gateway=Gateway(Store(str(tmp_path/'budget.sqlite')),Settings(generator='openai',token_budget=21000))
+    gateway=Gateway(Store(str(tmp_path/'budget.sqlite')),Settings(generator='openai',token_budget=21000,max_output_tokens=6000))
     with pytest.raises(openai.APIStatusError):
         gateway.call('generate',{'style':'x'*50000})
     assert len(calls)==1
@@ -286,3 +286,33 @@ def test_exhausted_credits_are_not_retried(monkeypatch):
         OpenAIProvider().complete('generate',{},'gpt-4.1')
     assert len(calls)==1
     assert failure_details(caught.value)['code']=='provider_credit_exhausted'
+
+
+@pytest.mark.parametrize('model,reasoning', [('gpt-5-mini', True), ('gpt-4.1', False)])
+def test_reasoning_models_use_completion_token_limit_without_temperature(monkeypatch, model, reasoning):
+    bodies = []
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json=response({'resume': [], 'cover_letter': [], 'skills': []}))
+    install_transport(monkeypatch, handler)
+    OpenAIProvider().complete('generate', {}, model, 9000)
+    body = bodies[0]
+    if reasoning:
+        assert body['max_completion_tokens'] == 9000 and body['reasoning_effort'] == 'low'
+        assert 'max_tokens' not in body and 'temperature' not in body
+    else:
+        assert body['max_tokens'] == 9000 and body['temperature'] == 0
+        assert 'max_completion_tokens' not in body and 'reasoning_effort' not in body
+
+
+def test_known_model_prices_give_a_cost_estimate(monkeypatch, tmp_path):
+    from career_pipeline.providers import Gateway
+    install_transport(monkeypatch, lambda request: httpx.Response(200, json=response(
+        {'resume': [], 'cover_letter': [], 'skills': []})))
+    gateway = Gateway(Store(str(tmp_path / 'cost.sqlite')), Settings(generator='openai'))
+    gateway.call('generate', {'style': 'x'})
+    # 30 input and 20 output tokens at gpt-5-mini's $0.25 / $2.00 per million.
+    assert gateway.telemetry[-1]['estimated_cost'] == pytest.approx((30 * 0.25 + 20 * 2.00) / 1e6)
+    custom = Gateway(Store(str(tmp_path / 'custom.sqlite')), Settings(generator='openai', generator_model='unlisted-model'))
+    custom.call('generate', {'style': 'y'})
+    assert custom.telemetry[-1]['estimated_cost'] is None

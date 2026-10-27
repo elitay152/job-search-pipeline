@@ -201,7 +201,7 @@ def to_career(result, text, reference):
     return Career(display_name=name, contact=contact, employments=jobs, evidence=records)
 
 
-def extract_resume(data, filename, provider='openai', model='gpt-4.1'):
+def extract_resume(data, filename, provider='openai', model='gpt-5-mini'):
     from .providers import OpenAIProvider, AnthropicProvider
     text = read_resume(data, filename)
     adapter = {'openai': OpenAIProvider, 'anthropic': AnthropicProvider}[provider]()

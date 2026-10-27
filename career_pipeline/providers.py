@@ -6,7 +6,7 @@ import math
 from collections import Counter
 from typing import Protocol
 from pydantic import BaseModel
-from .models import Packet, Finding, Career, Requirement, ClaimAssessment, Evidence
+from .models import Packet, Finding, Career, Requirement, ClaimAssessment, Evidence, MODEL_PRICES
 from .store import digest
 from .resume_intake import IndexedResumeIntake, INTAKE_INSTRUCTIONS
 
@@ -293,8 +293,12 @@ class Gateway:
         cost = None
         if provider == 'mock':
             cost = 0
-        elif self.settings.input_usd_per_million is not None and self.settings.output_usd_per_million is not None:
-            cost = (tin*self.settings.input_usd_per_million + tout*self.settings.output_usd_per_million)/1e6
+        else:
+            prices = ((self.settings.input_usd_per_million, self.settings.output_usd_per_million)
+                      if None not in (self.settings.input_usd_per_million, self.settings.output_usd_per_million)
+                      else MODEL_PRICES.get(model))
+            if prices:
+                cost = (tin*prices[0] + tout*prices[1])/1e6
         self.telemetry.append(dict(info, cached=False, status='passed', latency=time.monotonic()-start,
                                    input_tokens=tin, output_tokens=tout, estimated_cost=cost))
         self.store.db.execute('INSERT OR REPLACE INTO cache VALUES (?,?)', (key, json.dumps(result)))
@@ -322,6 +326,12 @@ def strict_tool_schema(schema):
                 close(value)
     close(result)
     return result
+
+
+def reasoning_model(model):
+    # GPT-5 and o-series models reason before answering: they take max_completion_tokens
+    # (which also covers reasoning tokens) and reject temperature. *-chat-latest models do not reason.
+    return model.startswith(('gpt-5', 'o1', 'o3', 'o4')) and 'chat' not in model
 
 
 def openai_key():
@@ -366,11 +376,13 @@ class OpenAIProvider:
         elif (payload.get('document_plan') or {}).get('include_cover_letter') is False:
             schema['properties']['cover_letter']['maxItems'] = 0
         wire, quote_catalog = evidence_quote_protocol(payload, schema) if task == 'review' else (payload, {})
+        # Low effort keeps reasoning from crowding out the structured result within the output limit.
+        limits = ({'max_completion_tokens': max_tokens, 'reasoning_effort': 'low'} if reasoning_model(model) else
+                  {'max_tokens': max_tokens, **({'temperature': 0} if model.startswith(('gpt-4', 'gpt-3.5')) else {})})
         for attempt in range(getattr(self, 'max_attempts', 3)):
             try:
                 self.requests_made = getattr(self, 'requests_made', 0) + 1
-                response = client.chat.completions.create(model=model, max_tokens=max_tokens,
-                    **({'temperature': 0} if model.startswith(('gpt-4', 'gpt-3.5')) else {}),
+                response = client.chat.completions.create(model=model, **limits,
                     messages=[{'role': 'system', 'content': RULES + factual_policy(payload) + '\n' + instructions + '\nApproved professional guidance:\n' + payload.get('style', '')},
                         {'role': 'user', 'content': json.dumps({'task': task,
                             'data': compact_context({k: v for k, v in wire.items() if k != 'style'})}, ensure_ascii=False)}],

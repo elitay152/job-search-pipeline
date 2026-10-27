@@ -172,7 +172,11 @@ class Finding(BaseModel):
     code: str = 'review'
     message: str
 
-DEFAULT_MODELS = {'mock': 'claude-sonnet-4-5', 'anthropic': 'claude-sonnet-4-5', 'openai': 'gpt-4.1'}
+DEFAULT_MODELS = {'mock': 'claude-sonnet-4-5', 'anthropic': 'claude-sonnet-4-5', 'openai': 'gpt-5-mini'}
+# Standard USD per 1M input/output tokens from OpenAI's pricing page, checked 2026-10-27.
+# Used for cost estimates when no price is set explicitly; reasoning tokens bill as output.
+MODEL_PRICES = {'gpt-5-mini': (0.25, 2.00), 'gpt-5-nano': (0.05, 0.40),
+                'gpt-4.1': (2.00, 8.00), 'gpt-4.1-mini': (0.40, 1.60)}
 
 class ContentQualitySettings(BaseModel):
     enabled: bool = True
@@ -195,7 +199,7 @@ class Settings(BaseModel):
     max_revisions: int = Field(default=2, ge=0, le=3)
     max_calls: int = Field(default=48, ge=1, le=100)
     token_budget: int = Field(default=500000, ge=1000)  # A full 2-revision run on a real career uses ~350–400k.
-    max_output_tokens: int = Field(default=6000, ge=256, le=16000)
+    max_output_tokens: int = Field(default=12000, ge=256, le=16000)  # Reasoning models spend part of this thinking.
     input_usd_per_million: float | None = Field(default=None, ge=0)
     output_usd_per_million: float | None = Field(default=None, ge=0)
 
