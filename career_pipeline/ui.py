@@ -378,7 +378,7 @@ elif page == 'Create application':
             limit_cols = st.columns(4)
             cycles = limit_cols[0].number_input('Revision cycles', 0, 3, 2)
             token_budget = limit_cols[1].number_input('Token budget', min_value=1000, value=500000, step=50000)
-            output_limit = limit_cols[2].number_input('Max output tokens per call', min_value=256, max_value=16000, value=6000,
+            output_limit = limit_cols[2].number_input('Max output tokens per call', min_value=256, max_value=16000, value=12000,
                 help='Separate from the total budget. Raise it if responses are cut off.')
             call_budget = limit_cols[3].number_input('Call budget', min_value=1, max_value=100, value=48, help='Includes retries.')
             st.markdown('**Writing checks**')
