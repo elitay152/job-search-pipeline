@@ -151,6 +151,7 @@ class Requirement(BaseModel):
     kind: Literal['skill', 'constraint'] = 'skill'
     classification: Literal['direct', 'transferable', 'unsupported', 'needs_clarification'] = 'unsupported'
     evidence_ids: list[str] = []
+    rationale: str | None = None  # One-sentence model explanation; None for word-overlap matching.
 
 class Claim(BaseModel):
     id: str

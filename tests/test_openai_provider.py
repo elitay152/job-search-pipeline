@@ -127,7 +127,7 @@ def test_openai_routes_through_pipeline_and_approval_gate(monkeypatch,tmp_path):
     store=Store(str(tmp_path/'openai.sqlite'))
     settings=Settings(generator='openai',reviewer='openai',factual_mode='model_reviewed')
     m=run(Path('fixtures/job.txt').read_text(),career,store,settings)
-    assert called==[('generate',None),('review','recruiter'),('review','voice')]
+    assert called==[('match',None),('generate',None),('review','recruiter'),('review','voice')]
     assert m['versions'][0]['reviews']['evidence']['deterministic_claim_ids']
     assert m['settings']['reviewer']=='openai' and not m['validation']
     assert all(t['provider']=='openai' for t in m['telemetry'])

@@ -51,7 +51,7 @@ def check_content_quality(packet, career, config, plan=None):
                 exact=tokens==prior_tokens
                 near=min(len(tokens),len(prior_tokens))>=6 and len(words & other)/max(1,len(words | other))>=config.repetition_similarity
                 if exact or near:
-                    warn('repeated_passage', f'This passage repeats or closely resembles {prior.id}. Remove repetition or make the supported distinction clear.',claim,section)
+                    warn('repeated_passage', f'This passage repeats or closely resembles "{prior.text[:80]}". Remove the repetition or make the distinction clear.',claim,section)
                     break
             seen.append((claim,tokens))
     letter=packet.cover_letter

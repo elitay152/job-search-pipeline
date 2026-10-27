@@ -22,7 +22,7 @@ from career_pipeline.ui_errors import configuration_problem, failure_message
 
 PAGES = ['Create application', 'My experience', 'Review & download', 'History']
 STATUS_COLORS = {'approved': 'green', 'draft': 'blue', 'needs_review': 'orange', 'failed': 'red', 'running': 'gray'}
-STAGE_LABELS = {'extract': 'Reading the job posting', 'retrieve': 'Matching your evidence to requirements',
+STAGE_LABELS = {'extract': 'Reading the job posting', 'match': 'Matching requirements to your evidence',
                 'generate': 'Writing the first draft', 'validate': 'Checking claims against your sources',
                 'review_evidence': 'Factual review', 'review_recruiter': 'Relevance review',
                 'review_voice': 'Writing-style review', 'revise': 'Revising the draft'}
@@ -55,8 +55,9 @@ def status_title(status):
     return status.replace('_', ' ').title()
 
 
-def findings_view(findings):
+def findings_view(findings, passages=None):
     labels = {'evidence': 'Factual accuracy', 'recruiter': 'Relevance & presentation', 'voice': 'Writing style'}
+    passages = passages or {}
     groups = [('error', 'Must fix', st.error), ('gap', 'Gaps', st.warning), ('suggestion', 'Suggestions', st.info)]
     if not findings:
         st.success('No outstanding findings.')
@@ -67,8 +68,11 @@ def findings_view(findings):
         st.markdown(f'**{heading}** · {len(selected)}')
         for finding in selected:
             role = labels.get(finding['role'], finding['role'])
-            target = finding.get('claim_id') or finding.get('section') or finding.get('requirement_id')
-            show(f"**{role}** · {target or 'Packet'}\n\n{finding['message']}")
+            # Name the passage by its words, not its internal ID.
+            text = passages.get(finding.get('claim_id'))
+            target = (f'"{text[:70]}…"' if len(text) > 70 else f'"{text}"') if text else (
+                (finding.get('section') or '').replace('_', ' ').title() or 'Whole application')
+            show(f"**{role}** · {target}\n\n{finding['message']}")
 
 
 def evidence_group(e, employers):
@@ -313,11 +317,13 @@ elif page == 'Create application':
             if not requirements:
                 st.warning('No job requirements were recognized. Add the responsibilities and qualifications from the posting.')
             else:
-                cols = st.columns(3)
-                cols[0].metric('Direct evidence', summary['direct'])
-                cols[1].metric('Transferable evidence', summary['transferable'])
-                cols[2].metric('Gaps to review', summary['gaps'] + summary['clarifications'],
-                               help='Based on word matching against your evidence, not an ATS score or hiring prediction.')
+                cols = st.columns(4)
+                cols[0].metric('Requirements with evidence', 'n/a' if summary['coverage_percent'] is None else f"{summary['coverage_percent']}%",
+                               help=f"{summary['supported']} of {summary['total']} requirements share key words with your evidence. "
+                                    'This quick preview uses word matching; live runs re-check each requirement with the model and explain it.')
+                cols[1].metric('Direct evidence', summary['direct'])
+                cols[2].metric('Transferable evidence', summary['transferable'])
+                cols[3].metric('Gaps to review', summary['gaps'] + summary['clarifications'])
             gaps = [q for q in requirements if q.kind == 'skill' and q.classification in GAP_CLASSIFICATIONS]
             job_hash = digest(jd)
             intake_id = 'intake-' + job_hash
@@ -482,11 +488,18 @@ elif page == 'Review & download':
             requirements = [Requirement.model_validate(q) for q in m.get('requirements', [])]
             summary = fit_report(requirements, packet)
             final_findings = m['versions'][-1]['findings']
+            model_matched = m.get('requirement_matching', {}).get('method') == 'model'
+            def percent(value):
+                return 'n/a' if value is None else f'{value}%'
             a, b, c, d = st.columns(4)
-            a.metric('Supported requirements covered', f"{summary['covered']} / {summary['supported']}",
-                     help='A passage cites evidence linked to the requirement. Word matching can be imperfect; this is not a hiring prediction.')
-            b.metric('Required items with evidence', f"{summary['required_supported']} / {summary['required_total']}")
-            c.metric('Experience gaps', summary['gaps'])
+            a.metric('Requirements covered', percent(summary['coverage_percent']),
+                     help=f"{summary['covered']} of {summary['total']} requirements are addressed by a passage that cites matching evidence. "
+                          + ('Matching was checked by the model; see Requirement coverage for the reason behind each.' if model_matched
+                             else 'Matching used shared words and can over-count related experience.')
+                          + ' Not an ATS score or hiring prediction.')
+            b.metric('Required covered', percent(summary['required_coverage_percent']),
+                     help=f"Of the {summary['required_total']} requirements the posting marks as required.")
+            c.metric('Experience gaps', summary['gaps'], help='Requirements with no matching evidence. See Requirement coverage.')
             d.metric('Must-fix findings', sum(f['severity'] == 'error' for f in final_findings))
             resume_tab, letter_tab, notes_tab, map_tab, export_tab = st.tabs(['Resume', 'Cover letter', 'Review notes', 'Requirement coverage', 'Approve & download'])
             with resume_tab:
@@ -501,7 +514,7 @@ elif page == 'Review & download':
             with notes_tab:
                 quality_status = m['versions'][-1].get('content_quality_status', 'not_recorded')
                 st.caption('Writing-quality checks: ' + quality_status.replace('_', ' ') + '. These are presentation heuristics, not factual certification.')
-                findings_view(final_findings)
+                findings_view(final_findings, {c.id: c.text for c in packet.resume + packet.cover_letter})
                 with st.expander('Evidence behind each passage'):
                     index = {e.id: e for e in snapshot.evidence}
                     for claim in packet.resume + packet.cover_letter:
@@ -532,9 +545,14 @@ elif page == 'Review & download':
                 skills = sorted((q for q in m.get('requirements', []) if q.get('kind') != 'constraint'),
                                 key=lambda q: (order[q['classification']], q['priority'] != 'required'))
                 index = {e.id: e for e in snapshot.evidence}
+                if not m.get('requirement_matching', {}).get('method') == 'model':
+                    st.caption('Matched by shared words. Live runs explain each match.')
                 st.dataframe([{'Match': labels[q['classification']], 'Priority': q['priority'].title(), 'Requirement': q['text'],
+                               'Why': q.get('rationale') or '',
                                'Evidence': ', '.join(dict.fromkeys(index[i].project for i in q['evidence_ids'] if i in index))}
-                              for q in skills], hide_index=True, width='stretch')
+                              for q in skills], hide_index=True, width='stretch',
+                             column_config={'Requirement': st.column_config.TextColumn(width='large'),
+                                            'Why': st.column_config.TextColumn(width='large')})
                 saved_answers = m.get('follow_up_answers', {})
                 questions = [q for q in m.get('discovery_questions', []) if q.get('classification') in GAP_CLASSIFICATIONS]
                 if questions:

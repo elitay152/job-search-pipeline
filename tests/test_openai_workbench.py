@@ -37,7 +37,9 @@ def test_openai_revision_truncation_approval_and_downloads(workspace, monkeypatc
         envelope = json.loads(wire['messages'][1]['content'])
         task, data = envelope['task'], envelope['data']
         calls.append((task, data.get('role')))
-        if task in ('generate', 'revise'):
+        if task == 'match':
+            result = {'matches': []}  # Keep word-overlap matching for this flow.
+        elif task in ('generate', 'revise'):
             result = initial if task == 'generate' else revised
         else:
             claims = data['packet']['resume'] + data['packet']['cover_letter']
@@ -64,7 +66,7 @@ def test_openai_revision_truncation_approval_and_downloads(workspace, monkeypatc
     field(app, 'button', 'Create my draft').click().run()
     assert not app.exception
     assert truncated
-    assert calls[:2] == [('generate',None), ('revise',None)]  # Repair before paid reviews.
+    assert calls[:3] == [('match',None), ('generate',None), ('revise',None)]  # Repair before paid reviews.
     assert ('review','evidence') in calls and ('review','recruiter') in calls and ('review','voice') in calls
     field(app, 'button', 'Prepare documents').click().run()
     assert all(Path(p).parent.name == 'draft' for p in app.session_state['downloads'])

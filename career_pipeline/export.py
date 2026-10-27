@@ -7,7 +7,7 @@ from .pipeline import audit
 from .store import digest, now
 from .grounding import accepted_assessments
 
-from .text_safety import XML_INVALID
+from .text_safety import XML_INVALID, reference_codes, strip_reference_codes
 from .baseline import employment_baseline, evidence_roles
 from types import SimpleNamespace
 
@@ -35,6 +35,10 @@ def resume_date(value):
 
 def preview(packet, career):
     index = {e.id: e for e in career.evidence}
+    if any(reference_codes(c.text, index) for c in packet.resume + packet.cover_letter):
+        packet = packet.model_copy(deep=True)
+        for claim in packet.resume + packet.cover_letter:
+            claim.text = strip_reference_codes(claim.text, index)
     baseline = employment_baseline(career)
     roles = {j['id']: SimpleNamespace(**j) for j in baseline['jobs']}
     resume = [f'# {career.display_name}', *career.contact]
