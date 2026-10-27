@@ -89,8 +89,17 @@ def deterministic_objections(text, linked):
     source = '\n'.join(source_text(e) for e in linked)
     low, original = text.lower(), source.lower()
     issues = delivery_scope_objections(text, linked)
-    if not numbers(text) <= numbers(source):
-        issues.append('new or altered number')
+    employers = {e.employer.strip().lower() for e in linked if e.employer.strip()}
+    heading_prefix = any(re.match(re.escape(name) + r'\s*(?:[:—–(-]|\s+[—–-])', low) for name in employers)
+    if heading_prefix:
+        issues.append('starts with the employer/title/dates already shown in the role heading; begin with the action instead')
+    extra = numbers(text) - numbers(source)
+    if extra:
+        years = all(1950 <= n <= 2100 and n == int(n) for n in extra)
+        shown = ', '.join(f'{n:.0f}' if years else f'{n:,.10g}' for n in sorted(extra))
+        issues.append(f'new or altered number: {shown}' + (
+            ' (these look like dates; role dates appear in the heading, so leave them out of the text)' if years else
+            ' (not found in the cited sources; use the source value or remove it)'))
     for tool in TOOLS:
         pattern = r'(?<![a-z0-9])' + re.escape(tool) + r'(?![a-z0-9])'
         if re.search(pattern, low) and not re.search(pattern, original):

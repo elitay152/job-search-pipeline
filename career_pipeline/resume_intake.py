@@ -243,11 +243,18 @@ def merge_resume(existing, imported):
         mapping[job.id] = match.id if match else job.id
         if not match and not any(j['id'] == job.id for j in data['employments']):
             data['employments'].append(job.model_dump(mode='json'))
+    from .duplicates import duplicate_key
     known = {e['id'] for e in data['evidence']}
+    # Re-importing must not add a second copy of a saved degree or publication in a new format.
+    saved = {duplicate_key(e): record for e, record in zip(existing.evidence, data['evidence']) if duplicate_key(e)}
     for evidence in imported.evidence:
         record = evidence.model_dump(mode='json')
         record['employment_ids'] = [mapping[i] for i in record['employment_ids']]
-        if record['id'] not in known:
+        match = saved.get(duplicate_key(evidence))
+        if match is not None:
+            references = {s['reference'] for s in match['sources']}
+            match['sources'] += [s for s in record['sources'] if s['reference'] not in references]
+        elif record['id'] not in known:
             data['evidence'].append(record)
     data['display_name'] = existing.display_name or imported.display_name
     data['contact'] = list(dict.fromkeys(existing.contact + imported.contact))

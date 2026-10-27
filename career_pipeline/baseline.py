@@ -69,10 +69,12 @@ def ensure_history_bullets(packet, career):
     result.resume = [c for c in result.resume if not (c.evidence_ids and c.evidence_ids[0] in index
                      and index[c.evidence_ids[0]].kind in ('education','publication'))]
     used_ids = {c.id for c in result.resume + result.cover_letter}
+    from .duplicates import hidden_duplicates
+    hidden = hidden_duplicates(career)  # A degree or paper saved twice is listed once.
     for source in career.evidence:
         include = ((source.kind == 'education' and career.presentation.include_education)
                    or (source.kind == 'publication' and career.presentation.include_publications))
-        if include and source.eligible:
+        if include and source.eligible and source.id not in hidden:
             ident = anchors.get(source.id, 'baseline-' + digest(source.id)[:20])
             while ident in used_ids:
                 ident += '-b'

@@ -1,7 +1,7 @@
 """Deterministic factual gate and document-level review, independent of any UI."""
 import re
 from .models import Career, Packet, Finding
-from .text_safety import XML_INVALID
+from .text_safety import XML_INVALID, reference_codes
 from .baseline import employment_baseline, evidence_roles
 
 
@@ -42,6 +42,12 @@ def audit(packet, career, grounded_claims=None, include_cover_letter=True):
             findings.append(Finding(role='evidence', claim_id=claim.id, evidence_ids=claim.evidence_ids,
                 severity='error', code='invalid_document_character',
                 message='Passage contains a control character that Word cannot store. Rewrite it from the cited evidence using ordinary text; preserve the facts.'))
+        codes = reference_codes(claim.text, index)
+        if codes:
+            findings.append(Finding(role='evidence', claim_id=claim.id, evidence_ids=claim.evidence_ids,
+                severity='error', code='reference_in_text',
+                message='Remove internal reference codes from the text: ' + ', '.join(codes)
+                        + '. Evidence IDs belong only in evidence_ids, never in the wording.'))
         linked = [index[i] for i in claim.evidence_ids if i in index]
         valid = len(linked) == len(claim.evidence_ids) and all(
             e.eligible and claim.text in e.supported_wording for e in linked)
@@ -85,19 +91,32 @@ def audit(packet, career, grounded_claims=None, include_cover_letter=True):
     return findings
 
 
+def shorten(text, limit=110):
+    text = ' '.join(text.split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + '…'
+
+
 def reviews(packet, requirements, career, plan=None, grounded_claims=None):
     findings = audit(packet, career, grounded_claims, include_cover_letter=(plan or {}).get('include_cover_letter', True))
     claims = packet.resume + packet.cover_letter
     used = {i for c in claims for i in c.evidence_ids} | set(packet.skills)
+    index = {e.id: e for e in career.evidence}
+
+    def names(ids):
+        return ', '.join(dict.fromkeys(f'"{index[i].project}"' for i in ids if i in index)) or 'your saved evidence'
     for q in requirements:
         if q.kind == 'constraint':
             continue
         if q.classification in ('unsupported', 'needs_clarification'):
-            findings.append(Finding(role='recruiter', requirement_id=q.id, severity='gap',
-                code='experience_gap', message=f'{q.classification}: {q.text}'))
+            label = 'No matching evidence' if q.classification == 'unsupported' else 'Needs clarification'
+            findings.append(Finding(role='recruiter', requirement_id=q.id, severity='gap', code='experience_gap',
+                message=f'{label} for "{shorten(q.text)}".' + (f' {q.rationale}' if q.rationale else
+                    ' Add the experience in My experience if you have it; otherwise leave it as a gap.')))
         elif not used.intersection(q.evidence_ids):
-            findings.append(Finding(role='recruiter', requirement_id=q.id, severity='suggestion',
-                code='missing_coverage', section='experience', message='Presentation: relevant evidence is missing from the packet.'))
+            findings.append(Finding(role='recruiter', requirement_id=q.id, severity='suggestion', evidence_ids=q.evidence_ids,
+                code='missing_coverage', section='experience',
+                message=f'Not yet addressed: "{shorten(q.text)}". Your evidence {names(q.evidence_ids)} supports it; '
+                        'consider a bullet or letter sentence that uses it.'))
     if plan:
         baseline = employment_baseline(career)
         supported_roles = {ident for e in career.evidence if e.eligible and e.kind == 'experience' for ident in evidence_roles(e, baseline)}
@@ -113,18 +132,25 @@ def reviews(packet, requirements, career, plan=None, grounded_claims=None):
             for ident in plan[kind]:
                 if ident not in resume_used:
                     findings.append(Finding(role='recruiter', section=kind, evidence_ids=[ident],
-                        severity='suggestion', code='missing_section_content', message=f'Include selected {kind} evidence.'))
+                        severity='suggestion', code='missing_section_content',
+                        message=f'Add {names([ident])} to the {kind.title()} section; it is saved but not in the resume.'))
         for group in plan['experience_groups']:
             passages = [c for c in packet.resume if set(c.evidence_ids).intersection(group['evidence_ids'])]
             if len(passages) < group['minimum_bullets']:
+                first = next((index[i] for i in group['evidence_ids'] if i in index), None)
+                role = ' — '.join(part for part in (first.official_title, first.employer) if part) if first else 'This role'
+                unused = [i for i in group['evidence_ids'] if i not in used]
                 findings.append(Finding(role='recruiter', section='experience', evidence_ids=group['evidence_ids'],
-                    severity='suggestion', code='thin_role', message=f"Role has {len(passages)} bullets; {group['minimum_bullets']} supported bullets are available and requested."))
+                    severity='suggestion', code='thin_role',
+                    message=f"{role or 'This role'} has {len(passages)} bullet{'s' if len(passages) != 1 else ''}; "
+                            f"{group['minimum_bullets']} are requested. Unused evidence: {names(unused[:4])}."))
         if plan['skill_evidence'] and not set(packet.skills).intersection(plan['skill_evidence']):
             findings.append(Finding(role='recruiter', section='skills', evidence_ids=plan['skill_evidence'],
                 severity='suggestion', code='missing_skills', message='Add one categorized Technical Skills section using evidence-backed tools and context labels.'))
     seen = set()
     for c in packet.resume:
         if c.text in seen or re.search(r'\b(rockstar|ninja|world-class|passionate|synergy)\b', c.text, re.I):
-            findings.append(Finding(role='voice', claim_id=c.id, severity='suggestion', code='voice', message='Review repetition or inflated language.'))
+            findings.append(Finding(role='voice', claim_id=c.id, severity='suggestion', code='voice',
+                message=f'"{shorten(c.text, 80)}" repeats another bullet or uses inflated language; rewrite or remove it.'))
         seen.add(c.text)
     return findings

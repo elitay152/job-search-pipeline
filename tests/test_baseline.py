@@ -96,7 +96,7 @@ def test_numeric_rendering_preserves_scientific_and_magnitude_values():
     e = c.evidence[0].model_copy(update={'confirmed_statements':['Database size: approximately 2e+07 claims.'],
         'approved_wording':[], 'fact_details':{}, 'metrics':[], 'sources':[]})
     assert 'new or altered number' not in deterministic_objections('Database size: approximately 20 million claims.', [e])
-    assert 'new or altered number' in deterministic_objections('Database size: approximately 30 million claims.', [e])
+    assert any(o.startswith('new or altered number: 30,000,000') for o in deterministic_objections('Database size: approximately 30 million claims.', [e]))
 
 
 def test_led_to_describes_an_outcome_not_personal_leadership():

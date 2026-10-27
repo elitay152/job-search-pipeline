@@ -15,17 +15,22 @@ def review_report(manifest, career):
     packet = Packet.model_validate(manifest['versions'][-1]['packet']) if manifest['versions'] else None
     requirements = [Requirement.model_validate(q) for q in manifest.get('requirements', [])]
     summary = fit_report(requirements, packet)
+    model_matched = manifest.get('requirement_matching', {}).get('method') == 'model'
+    def percent(value):
+        return 'n/a' if value is None else f'{value}%'
     lines += ['## Evidence coverage',
-        f"Supported requirements represented: {summary['covered']} / {summary['supported']}.",
-        f"Required items with evidence: {summary['required_supported']} / {summary['required_total']}.",
+        f"Requirements covered: {percent(summary['coverage_percent'])} ({summary['covered']} of {summary['total']} addressed by a passage citing matching evidence).",
+        f"Required requirements covered: {percent(summary['required_coverage_percent'])} of {summary['required_total']}.",
         f"Direct: {summary['direct']}; transferable: {summary['transferable']}; gaps: {summary['gaps']}; clarification needed: {summary['clarifications']}.",
-        'Lexical matching and cited evidence are not proof of semantic coverage. This is not an ATS score or a hiring prediction.']
+        ('Requirements were matched to evidence by the generation model, with a stated reason for each.' if model_matched else
+         'Requirements were matched by shared words, which can over-count related experience.'),
+        'This is not an ATS score or a hiring prediction.']
     for row in requirement_details(requirements, packet, manifest.get('follow_up_answers')):
         lines += [f"### {row['id']} · {row['priority']} · {row['kind']} · {row['classification']}",
             'JD excerpt: ' + row['excerpt'], row['explanation'],
             'Evidence: ' + (', '.join(row['evidence_ids']) or 'none'),
             'Linked passages (not semantic proof): ' + (', '.join(row['passage_ids']) or 'none')]
-    lines += ['## Judgment sources', 'Coverage above is deterministic lexical/tag matching. Reviewer findings below are model judgments in live mode and deterministic checks in practice mode. Human preference and editing effort: not collected by this report.']
+    lines += ['## Judgment sources', ('Coverage above uses model matching with reasons.' if model_matched else 'Coverage above is deterministic lexical/tag matching.') + ' Reviewer findings below are model judgments in live mode and deterministic checks in practice mode. Human preference and editing effort: not collected by this report.']
     if manifest.get('follow_up_answers'):
         lines += ['## Your follow-up answers']
         lines += [f"- {value['requirement_id']}: {value['answer']}" for value in manifest['follow_up_answers'].values()]

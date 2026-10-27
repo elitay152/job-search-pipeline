@@ -52,11 +52,20 @@ def fit_report(requirements, packet=None):
     supported = [q for q in requirements if q.kind == 'skill' and q.classification in ('direct', 'transferable')]
     covered = [q for q in supported if used.intersection(q.evidence_ids)] if packet else []
     counts = Counter(q.classification for q in requirements if q.kind == 'skill')
+    skills = [q for q in requirements if q.kind == 'skill']
+    required = [q for q in skills if q.priority == 'required']
+    # Before drafting, "addressed" means evidence exists; afterwards, a passage must cite it.
+    addressed = covered if packet else supported
+
+    def percent(part, whole):
+        return round(100 * len(part) / len(whole)) if whole else None
     return {'direct': counts['direct'], 'transferable': counts['transferable'],
         'gaps': counts['unsupported'], 'clarifications': counts['needs_clarification'],
-        'supported': len(supported), 'covered': len(covered),
+        'supported': len(supported), 'covered': len(covered), 'total': len(skills),
         'required_supported': sum(q.priority == 'required' for q in supported),
-        'required_total': sum(q.kind == 'skill' and q.priority == 'required' for q in requirements),
+        'required_total': len(required),
+        'coverage_percent': percent(addressed, skills),
+        'required_coverage_percent': percent([q for q in addressed if q.priority == 'required'], required),
         'practical_constraints': sum(q.kind == 'constraint' for q in requirements)}
 
 
@@ -67,6 +76,7 @@ def requirement_details(requirements, packet=None, answers=None):
     return [dict(q.model_dump(),
         passage_ids=[c.id for c in passages if set(c.evidence_ids).intersection(q.evidence_ids)],
         explanation=('Posting logistics only; excluded from resume tailoring and follow-up questions.' if q.kind == 'constraint'
+            else q.rationale if q.rationale
             else 'No supporting evidence selected; clarify or retain as a gap.' if not q.evidence_ids
             else 'Lexical/tag matching selected these sources; inspect wording and context before accepting coverage.'),
         follow_up=answers.get(q.id)) for q in requirements]
