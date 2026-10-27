@@ -23,11 +23,18 @@ def field(app, kind, label):
     return next(element for element in getattr(app, kind) if element.label == label)
 
 
+def go(app, page):
+    # Only the selected page is built, so switch pages before using its widgets.
+    field(app, 'radio', 'Go to').set_value(page).run()
+    return app
+
+
 def test_first_use_and_confirmed_evidence_form(workspace):
     app = AppTest.from_file(str(ROOT / 'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
     assert not app.exception
     assert field(app, 'button', 'Create my draft').disabled
     assert not any(e.label.startswith('Career evidence JSON') for e in app.text_area)
+    go(app, 'My experience')
     field(app, 'text_input', 'Name').set_value('Morgan Example')
     field(app, 'button', 'Save contact details').click().run()
     field(app, 'text_input', 'Project or accomplishment').set_value('Warehouse ingestion')
@@ -60,6 +67,7 @@ def test_mock_application_previews_and_readable_reviews(workspace):
 
 def test_employment_form_validates_dates(workspace):
     app = AppTest.from_file(str(ROOT / 'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    go(app, 'My experience')
     field(app, 'text_input', 'Employer').set_value('Example Co')
     field(app, 'text_input', 'Official job title').set_value('Analyst')
     field(app, 'text_input', 'Start (YYYY-MM)').set_value('2025-03')
@@ -170,6 +178,7 @@ def test_resume_upload_saves_history_without_confirmation_step(workspace, monkey
         for source in e.sources: source.status = 'user_provided'
     monkeypatch.setattr('career_pipeline.resume_intake.extract_resume', lambda *args: (imported, 'Synthetic source text'))
     app = AppTest.from_file(str(ROOT/'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    go(app, 'My experience')
     field(app, 'button', 'Import resume').click().run()
     assert not app.exception
     saved = Career.model_validate_json((workspace/'local/career.json').read_text(encoding='utf-8'))
@@ -188,3 +197,21 @@ def test_practical_constraints_do_not_ask_for_preferences(workspace):
     assert not any('practical requirement' in e.label for e in app.text_input)
     assert not any(e.label == 'Save preference' for e in app.button)
     assert any(e.label == 'Do you have relevant experience?' for e in app.radio)
+
+
+def test_failed_run_is_shown_as_failed_without_approval(workspace, monkeypatch):
+    from career_pipeline.providers import MockProvider
+    def broken(self, task, payload, model):
+        raise ValueError('OpenAI response incomplete; no candidate or review accepted')
+    monkeypatch.setattr(MockProvider, 'complete', broken)
+    app = AppTest.from_file(str(ROOT / 'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    field(app, 'button', 'Load synthetic example').click().run()
+    field(app, 'text_area', 'Paste the job description').set_value((workspace / 'fixtures/job.txt').read_text()).run()
+    field(app, 'button', 'Create my draft').click().run()
+    assert not app.exception
+    assert any('per-call output limit' in e.value for e in app.error)
+    go(app, 'Review & download')
+    assert any(s.value == 'Failed' for s in app.subheader)
+    assert any('Stopped at generate' in e.value for e in app.error)
+    assert not any(b.label == 'Approve this application' for b in app.button)
+    assert not any(m.label == 'Supported requirements covered' for m in app.metric)

@@ -108,9 +108,13 @@ def read_resume(data, filename):
             document = Document(io.BytesIO(data))
             from docx.text.paragraph import Paragraph
             lines = []
+            # Soft line breaks and tabs separate text inside one paragraph (e.g. a skills block);
+            # dropping them glues neighbouring lines together.
+            breaks = {qn('w:br'): '\n', qn('w:cr'): '\n', qn('w:tab'): ' '}
             for element in document.element.body.iter(qn('w:p')):
                 paragraph = Paragraph(element, document)
-                value = ''.join(t.text or '' for t in element.iter(qn('w:t')))
+                value = ''.join(node.text or '' if node.tag == qn('w:t') else breaks.get(node.tag, '')
+                                for node in element.iter(qn('w:t'), *breaks))
                 numbered = element.find('.//' + qn('w:numPr')) is not None
                 listed = paragraph.style is not None and paragraph.style.name.startswith('List')
                 lines.append(('- ' if value and (numbered or listed) else '') + value)

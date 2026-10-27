@@ -225,3 +225,39 @@ def test_gap_discovery_is_nonleading_and_not_automatic_evidence(career, store):
     assert missing['answer_status'] == 'unanswered'
     assert 'Kubernetes' not in json.dumps(m['versions'][-1]['packet'])
     assert m['style']['guidance_version'] == 'resume-guidance-v3'
+
+
+def test_extract_ignores_job_board_page_around_posting():
+    jd = '\n'.join([
+        'Example Co hiring Data Engineer | JobBoard', 'Sign in with Email', 'Email or phone', 'Forgot password?',
+        'Responsibilities', 'Build Python pipelines for daily ingestion.',
+        'Preferred Qualifications:', 'Experience with Terraform or another Infrastructure-as-Code tool.',
+        'Clearance Requirement:', 'US Citizen or Lawful Permanent Resident (Green Card)',
+        'Benefits', 'We offer a competitive benefits package including paid time off.',
+        'Commitment Equal Opportunity Employment & VEVRAA',
+        'We encourage protected veterans to self-identify during the application process.',
+        'How To Apply', 'To apply, please click the blue Apply button at the top right.',
+        'Referrals increase your chances of interviewing at Example Co by 2x', 'See who you know',
+        '3 days ago', 'San Francisco, CA', 'Data Engineer II', 'Senior Data Engineer jobs', '78,076 open jobs'])
+    texts = {q.text: q for q in extract(jd)}
+    assert set(texts) == {'Build Python pipelines for daily ingestion.',
+                          'Experience with Terraform or another Infrastructure-as-Code tool.',
+                          'US Citizen or Lawful Permanent Resident (Green Card)'}
+    assert texts['US Citizen or Lawful Permanent Resident (Green Card)'].kind == 'constraint'
+
+
+def test_follow_up_questions_cover_only_real_gaps():
+    from career_pipeline.models import Requirement
+    from career_pipeline.pipeline import discovery_questions
+    requirements = [Requirement(id=f'q{i}', text=f'Requirement {i}', excerpt=f'Requirement {i}', priority='required',
+                                kind=kind, classification=classification)
+                    for i, (kind, classification) in enumerate([('skill', 'direct'), ('skill', 'transferable'),
+        ('skill', 'unsupported'), ('skill', 'needs_clarification'), ('constraint', 'needs_clarification')])]
+    assert [q['requirement_id'] for q in discovery_questions(requirements)] == ['q2', 'q3']
+
+
+def test_run_reports_each_stage_for_progress_display(career, store):
+    seen = []
+    run(Path('fixtures/job.txt').read_text(), career, store, on_stage=lambda name, revision: seen.append(name))
+    assert seen[:3] == ['baseline_sources', 'extract', 'retrieve']
+    assert {'generate', 'validate', 'review_evidence', 'review_recruiter', 'review_voice'} <= set(seen)

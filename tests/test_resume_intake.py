@@ -121,3 +121,15 @@ def test_indexed_intake_keeps_technical_projects_instead_of_dropping_their_bulle
         projects=[dict(title_line_id=9,statement_line_ids=[10])])
     result=to_career(from_line_selection(selection,lines),'\n'.join(lines),'synthetic upload')
     assert any(e.kind=='project' and 'monitoring prototype' in e.supported_wording[0] for e in result.evidence)
+
+
+def test_docx_soft_line_breaks_and_tabs_separate_text():
+    document = Document()
+    run = document.add_paragraph().add_run('Data: Python, SQL')
+    run.add_break()
+    run.add_text('Cloud: AWS')
+    run.add_tab()
+    run.add_text('Azure')
+    target = io.BytesIO()
+    document.save(target)
+    assert read_resume(target.getvalue(), 'resume.docx').strip().splitlines() == ['Data: Python, SQL', 'Cloud: AWS Azure']

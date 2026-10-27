@@ -1,6 +1,7 @@
 """Explicit synthetic provider checks; no user documents or secrets in results."""
 import subprocess
 import time
+from functools import lru_cache
 from pathlib import Path
 from .diagnostics import failure_details
 from .models import Packet, Career, Settings
@@ -9,6 +10,7 @@ from .pipeline import validate_review_contract
 from .ui_errors import configuration_problem
 
 
+@lru_cache(maxsize=1)  # Streamlit reruns the script on every interaction; git is slow on Windows.
 def app_version():
     try:
         return subprocess.run(['git', 'rev-parse', '--short', 'HEAD'],
