@@ -19,6 +19,7 @@ from career_pipeline.report import review_report
 from career_pipeline.readiness import app_version, check_provider, budget_plan
 from career_pipeline.baseline import missing_source_jobs
 from career_pipeline.ui_errors import configuration_problem, failure_message
+from career_pipeline.duplicates import duplicate_groups, merge_duplicates
 
 PAGES = ['Create application', 'My experience', 'Review & download', 'History']
 STATUS_COLORS = {'approved': 'green', 'draft': 'blue', 'needs_review': 'orange', 'failed': 'red', 'running': 'gray'}
@@ -208,6 +209,16 @@ if page == 'My experience':
                         validation_message(exc)
 
     with evidence_tab:
+        duplicates = duplicate_groups(career)
+        if duplicates:
+            with st.container(border=True):
+                st.warning(f"{len(duplicates)} item{'s are' if len(duplicates) != 1 else ' is'} saved more than once "
+                           'in different formats. Drafts already use one copy of each.')
+                for group in duplicates:
+                    st.caption('• ' + (group[0].supported_wording or [group[0].project])[0][:120])
+                if st.button('Merge duplicates', help='Keeps the version you confirmed and records the other copy as an extra source.'):
+                    save_career(merge_duplicates(career)[0])
+                    st.rerun()
         employers = {j.id: j.employer for j in career.employments}
         groups = {}
         for e in career.evidence:

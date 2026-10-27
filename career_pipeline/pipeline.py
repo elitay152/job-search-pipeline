@@ -15,6 +15,7 @@ from .baseline import employment_baseline, ensure_history_bullets
 from .content_quality import check_content_quality
 from .diagnostics import failure_details
 from .text_safety import strip_reference_codes
+from .duplicates import hidden_duplicates
 
 TOKENS = re.compile(r'[a-z0-9+#]+')
 NAMED_TOOLS = ('sql server', 'azure devops', 'azure data factory', 'azure sql', 'blob storage',
@@ -359,7 +360,10 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
         selected = {i for q in requirements for i in q.evidence_ids}
         # Document anchors are explicit: record omission must not hide publications, skills,
         # or an otherwise relevant role simply because its vocabulary lost a top-k contest.
-        eligible = [e for e in career.evidence if e.eligible]
+        # A degree or publication saved twice in different formats is rendered once.
+        hidden = hidden_duplicates(career)
+        selected -= hidden
+        eligible = [e for e in career.evidence if e.eligible and e.id not in hidden]
         if strategy == 'A':
             selected = {e.id for e in eligible}
         else:
