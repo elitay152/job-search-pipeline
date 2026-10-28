@@ -489,6 +489,12 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                     for ident, reasons in rejected.items():
                         findings.append(Finding(role='evidence', claim_id=ident, severity='error',
                             code='grounding_rejected', message='; '.join(reasons)))
+                    # The structured verdict outranks free text: an "error" on a passage the auditor
+                    # itself assessed as fully supported is a confirmation, not a problem.
+                    parsed = [f for f in parsed if not (f.severity == 'error' and f.claim_id in grounded)]
+                    # A specific objection makes the generic "not exact wording" note redundant.
+                    specific = {f.claim_id for f in findings + parsed if f.severity == 'error' and f.code != 'unsupported_wording'}
+                    findings = [f for f in findings if not (f.code == 'unsupported_wording' and f.claim_id in specific)]
                 if role != 'evidence':
                     deterministic = {digest(f.model_dump()) for f in findings} - advisory
                     # Reviewer-labelled rewrites use existing facts and may be applied; other

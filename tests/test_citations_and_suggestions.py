@@ -112,3 +112,58 @@ def test_letter_focus_uses_matched_work_not_degrees(tmp_path):
     assert focus and not any('degree' in f.lower() or 'years' in f.lower() for f in focus)
     m = run(jd, career, Store(str(tmp_path / 'e.sqlite')), Settings(include_cover_letter=False))
     assert 'letter_focus' not in m['composition_plan']
+
+
+def test_unquoted_positive_verdict_gets_one_correction_instead_of_failing(monkeypatch, tmp_path):
+    from career_pipeline.providers import OpenAIProvider
+    career = library()
+    source = 'Built Python ingestion pipelines with duplicate checks.'
+    packet = Packet(resume=[Claim(id='r1', text='Developed Python ingestion pipelines with duplicate checks.', evidence_ids=['a1'])],
+                    cover_letter=[])
+    evidence_calls = []
+    def complete(self, task, payload, model, max_tokens):
+        self.requests_made = 1
+        if task == 'match':
+            return {'result': {'matches': []}, 'input_tokens': 1, 'output_tokens': 1}
+        claims = payload['packet']['resume'] + payload['packet']['cover_letter']
+        result = {'findings': [], 'reviewed_claim_ids': [c['id'] for c in claims], 'assessments': []}
+        if payload['role'] == 'evidence':
+            evidence_calls.append(bool(payload.get('contract_correction')))
+            # After a stray quote is dropped, the first verdict is positive but has no quote.
+            quotes = [{'evidence_id': 'a1', 'text': source}] if payload.get('contract_correction') else []
+            result['assessments'] = [dict(claim_id=c['id'], evidence_ids=c['evidence_ids'], quotes=quotes,
+                wording_supported=True, metrics_consistent=True, technology_consistent=True,
+                scope_consistent=True, dates_titles_consistent=True) for c in claims if c['id'] == 'r1']
+        return {'result': result, 'input_tokens': 1, 'output_tokens': 1}
+    monkeypatch.setattr(OpenAIProvider, 'complete', complete)
+    m = run(JD, career, Store(str(tmp_path / 'f.sqlite')),
+            Settings(generator='openai', reviewer='openai', factual_mode='model_reviewed', max_revisions=0), seed_packet=packet)
+    assert evidence_calls == [False, True]
+    assert m['status'] != 'failed'
+    assert [a['status'] for a in m['versions'][0]['reviews']['evidence']['attempts']] == ['rejected', 'accepted']
+
+
+def test_error_contradicting_a_supported_verdict_is_dropped(monkeypatch, tmp_path):
+    from career_pipeline.providers import OpenAIProvider
+    career = library()
+    source = 'Built Python ingestion pipelines with duplicate checks.'
+    packet = Packet(resume=[Claim(id='r1', text='Developed Python ingestion pipelines with duplicate checks.', evidence_ids=['a1'])],
+                    cover_letter=[])
+    def complete(self, task, payload, model, max_tokens):
+        self.requests_made = 1
+        if task == 'match':
+            return {'result': {'matches': []}, 'input_tokens': 1, 'output_tokens': 1}
+        claims = payload['packet']['resume'] + payload['packet']['cover_letter']
+        result = {'findings': [], 'reviewed_claim_ids': [c['id'] for c in claims], 'assessments': []}
+        if payload['role'] == 'evidence' and any(c['id'] == 'r1' for c in claims):
+            result['findings'] = [{'role': 'evidence', 'claim_id': 'r1', 'evidence_ids': ['a1'], 'severity': 'error',
+                                   'code': 'EVIDENCE_MATCH', 'message': 'Assessment performed; evidence supports the claim.'}]
+            result['assessments'] = [dict(claim_id='r1', evidence_ids=['a1'], quotes=[{'evidence_id': 'a1', 'text': source}],
+                wording_supported=True, metrics_consistent=True, technology_consistent=True,
+                scope_consistent=True, dates_titles_consistent=True)]
+        return {'result': result, 'input_tokens': 1, 'output_tokens': 1}
+    monkeypatch.setattr(OpenAIProvider, 'complete', complete)
+    m = run(JD, career, Store(str(tmp_path / 'g.sqlite')),
+            Settings(generator='openai', reviewer='openai', factual_mode='model_reviewed', max_revisions=0), seed_packet=packet)
+    assert not any(f['code'] == 'EVIDENCE_MATCH' for f in m['versions'][0]['findings'])
+    assert not any(f['claim_id'] == 'r1' and f['severity'] == 'error' for f in m['versions'][0]['findings'])

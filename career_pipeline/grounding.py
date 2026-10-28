@@ -270,8 +270,10 @@ def accepted_assessments(packet, career, raw_assessments):
         if len(linked) != len(claim.evidence_ids) or not all(e.eligible for e in linked):
             reasons.append('missing or uncertain evidence')
         checked = ('wording_supported','metrics_consistent','technology_consistent','scope_consistent','dates_titles_consistent')
-        if not all(getattr(assessment,key) for key in checked):
-            reasons.append('live auditor found an unsupported factual element')
+        failed = [label for key, label in zip(checked, ('wording', 'metrics', 'technology', 'scope', 'dates or titles'))
+                  if not getattr(assessment, key)]
+        if failed:
+            reasons.append('the fact-check reviewer found the ' + ', '.join(failed) + ' not supported by the cited sources')
         quoted = set()
         for quote in assessment.quotes:
             if quote.evidence_id not in claim.evidence_ids or quote.evidence_id not in index:
