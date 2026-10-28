@@ -136,10 +136,10 @@ def reviews(packet, requirements, career, plan=None, grounded_claims=None):
                         message=f'Add {names([ident])} to the {kind.title()} section; it is saved but not in the resume.'))
         for group in plan['experience_groups']:
             passages = [c for c in packet.resume if set(c.evidence_ids).intersection(group['evidence_ids'])]
-            if len(passages) < group['minimum_bullets']:
+            unused = [i for i in group['evidence_ids'] if i not in used]
+            if len(passages) < group['minimum_bullets'] and unused:  # Nothing to add means nothing to act on.
                 first = next((index[i] for i in group['evidence_ids'] if i in index), None)
                 role = ' — '.join(part for part in (first.official_title, first.employer) if part) if first else 'This role'
-                unused = [i for i in group['evidence_ids'] if i not in used]
                 findings.append(Finding(role='recruiter', section='experience', evidence_ids=group['evidence_ids'],
                     severity='suggestion', code='thin_role',
                     message=f"{role or 'This role'} has {len(passages)} bullet{'s' if len(passages) != 1 else ''}; "

@@ -9,7 +9,7 @@ from .models import Career, Requirement, Packet, Finding, Settings
 from .providers import Gateway, PROMPT_VERSION, IncompleteResponse
 from .store import Store, digest, now
 from .review import audit, reviews, document_plan, group_key
-from .grounding import accepted_assessments, deterministic_objections
+from .grounding import accepted_assessments, deterministic_objections, repair_citations
 from .composition import build_composition_plan
 from .baseline import employment_baseline, ensure_history_bullets
 from .content_quality import check_content_quality
@@ -22,6 +22,7 @@ NAMED_TOOLS = ('sql server', 'azure devops', 'azure data factory', 'azure sql', 
                'power bi', 'kubernetes', 'terraform', 'nuget', 'npm', 'mosaic ai', 'unity catalog')
 STOP = {'the','a','an','and','of','to','in','with','for','is','you','we','required','preferred','must','have','experience','using'}
 GAP_CLASSIFICATIONS = ('unsupported', 'needs_clarification')
+REVIEW_LIMITS = {'recruiter': 8, 'voice': 6}
 # Pasted or imported postings often carry the job board's page around them. Boilerplate
 # sections end the requirement list; job-board listings after the posting end extraction.
 POSTING_BOILERPLATE = re.compile(r'^(benefits|perks|what we offer|the company|about (us|the company|[a-z0-9&.,\' -]{2,40})|'
@@ -236,6 +237,8 @@ def validate_review_contract(raw, role, packet, requirements, career, factual_mo
         if role != 'evidence' and f.severity == 'error':
             # Presentation reviewers advise; only factual auditing and deterministic checks block approval.
             f.severity = 'suggestion'
+    if role in REVIEW_LIMITS:
+        parsed = parsed[:REVIEW_LIMITS[role]]  # Most important first; a long list is not actionable.
     receipt = set(raw.get('reviewed_claim_ids', []))
     if role == 'evidence' and receipt != known:
         raise ValueError('Evidence reviewer did not account for every claim')
@@ -390,6 +393,16 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
         manifest['composition_plan'] = build_composition_plan(career, selected)
         if not settings.include_cover_letter:
             manifest['composition_plan']['cover_letter_paragraphs'] = []
+        else:
+            # Anchor the letter to the posting's best-matched requirements rather than a tour of
+            # all experience. Degrees and years-of-experience lines make poor letter themes.
+            index = {e.id: e for e in career.evidence}
+            themes = [q for q in requirements if q.kind == 'skill' and q.classification in ('direct', 'transferable')
+                      and q.evidence_ids and not re.search(r'\b(years?|degree|bachelor|master)\b', q.text.lower())
+                      and any(i in index and index[i].kind != 'education' for i in q.evidence_ids)]
+            themes.sort(key=lambda q: (q.classification != 'direct', q.priority == 'preferred'))
+            manifest['composition_plan']['letter_focus'] = [
+                {'requirement': q.text, 'evidence_ids': q.evidence_ids, 'why': q.rationale} for q in themes[:3]]
         plan['employment_baseline'] = manifest['employment_baseline']
         manifest['document_plan'] = plan
         manifest['requirements'] = [q.model_dump() for q in requirements]
@@ -404,6 +417,9 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
         original_claims = {c.id for c in packet.resume}
         packet = stage('baseline_bullets', lambda: ensure_history_bullets(packet, career))
         manifest['baseline_restored_claims'] = [c.id for c in packet.resume if c.id not in original_claims]
+        augment = settings.factual_mode == 'model_reviewed'  # Strict mode needs every cited record's exact wording.
+        packet, repairs = repair_citations(packet, career, augment)
+        manifest['citation_repairs'] = [dict(r, version=0) for r in repairs]
         def review_role(role, version, packet, findings, advisory, quality):
             """Run one reviewer on a version; returns updated findings and newly grounded claim IDs."""
             grounded = set()
@@ -475,7 +491,9 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                             code='grounding_rejected', message='; '.join(reasons)))
                 if role != 'evidence':
                     deterministic = {digest(f.model_dump()) for f in findings} - advisory
-                    advisory.update(key for key in (digest(f.model_dump()) for f in parsed)
+                    # Reviewer-labelled rewrites use existing facts and may be applied; other
+                    # advice (often a request for new facts) stays with the user.
+                    advisory.update(key for key in (digest(f.model_dump()) for f in parsed if f.code != 'rewrite')
                                     if key not in deterministic)
                 findings.extend(parsed)
                 version['reviews'][role].update(status='passed', findings=[f.model_dump() for f in parsed],
@@ -501,6 +519,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
             return findings, grounded
 
         seen = set()
+        rewrites_applied = False
         last_passing = None
         for revision in range(settings.max_revisions + 1):
             signature = digest(packet.model_dump())
@@ -564,8 +583,11 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                 last_passing = deepcopy(version)
             # Model-only presentation suggestions often ask for experience the sources do not
             # establish; revising toward them invites unsupported claims, so they stay with the user.
+            # Reviewer rewrites are applied in one revision pass, so reviewers cannot keep the
+            # rewriter busy with fresh stylistic preferences every round.
             actionable = [f for f in version['findings'] if f['severity'] == 'error'
-                          or (f['severity'] == 'suggestion' and digest(f) not in advisory)]
+                          or (f['severity'] == 'suggestion' and digest(f) not in advisory
+                              and not (f.get('code') == 'rewrite' and rewrites_applied))]
             if strategy != 'C' or not actionable:
                 manifest['stopping_reason'] = ('one_shot' if strategy != 'C' else
                                                'review_unavailable' if incomplete else 'material_issues_resolved')
@@ -576,6 +598,7 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
             seen.add(signature)
             candidate = stage('revise', lambda: Packet.model_validate(gateway.call('revise', dict(payload,
                 packet=packet.model_dump(), findings=actionable))))
+            rewrites_applied = rewrites_applied or any(f.get('code') == 'rewrite' for f in actionable)
             if last_passing is None and grounded:
                 previous_claims = {c.id: c for c in packet.resume + packet.cover_letter}
                 index = {e.id: e for e in career.evidence}
@@ -591,6 +614,8 @@ def run(jd, career, store=None, settings=None, style_path='writing_style', strat
                                     'reason': objections, 'from_version': version['number']})
             before_baseline = {c.id for c in candidate.resume}
             candidate = ensure_history_bullets(candidate, career)
+            candidate, repairs = repair_citations(candidate, career, augment)
+            manifest['citation_repairs'] += [dict(r, version=revision + 1) for r in repairs]
             manifest['baseline_restored_claims'].extend(c.id for c in candidate.resume if c.id not in before_baseline)
             store.event(run_id, 'revision_candidate', {'packet': candidate.model_dump(),
                 'validation': [f.model_dump() for f in audit(candidate, career, include_cover_letter=settings.include_cover_letter)]})
