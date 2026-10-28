@@ -10,6 +10,11 @@ from .models import ClaimAssessment
 TOOLS = ('python','pyspark','snowflake','sql server','databricks','power bi','dbt','kubernetes',
          'terraform','docker','scala','java','azure data factory','azure sql','blob storage',
          'azure functions','synapse','mosaic ai','unity catalog','nuget','npm','c#','.net')
+# Any form of the verb in a source supports the past tense in a bullet ("Lead weekly
+# deployments" on a resume supports "Led weekly deployments").
+OWNERSHIP_VERBS = {'owned': r'\bown(?:s|ed|ing)?\b', 'led': r'\b(?:led|lead|leads|leading)\b',
+                   'managed': r'\bmanag(?:e|es|ed|ing)\b', 'supervised': r'\bsupervis(?:e|es|ed|ing)\b',
+                   'directed': r'\bdirect(?:s|ed|ing)\b', 'architected': r'\barchitect(?:s|ed|ing)\b'}
 
 
 def numbers(text):
@@ -83,6 +88,73 @@ def delivery_scope_objections(text, linked):
             if re.search(pattern, topics) and not re.search(pattern, source_topics):
                 issues.append('unestablished peer-training topic: ' + label)
     return issues
+
+
+def _repairable(objection):
+    """The tool named by an objection that citing a better record can resolve.
+
+    Ownership verbs are never repaired this way: "led" belongs to one piece of work, and
+    another record that mentions leading something else does not support it."""
+    match = re.match(r'unestablished technology: (.+)$', objection)
+    return match.group(1) if match else None
+
+
+def _states(e, tool):
+    return bool(re.search(r'(?<![a-z0-9])' + re.escape(tool) + r'(?![a-z0-9])', source_text(e).lower()))
+
+
+def repair_citations(packet, career, augment=True):
+    """Fix citations before a claim is called unsupported.
+
+    The model sometimes cites a neighbouring record instead of the one that states a tool or
+    or cites an ID that is not a record at all. Unknown IDs are dropped. With augment, a
+    record that states the missing tool is added: for resume bullets only a record about the
+    same project and job; for letter sentences, which summarize skills, a record from the
+    named employer (any if none is named). A skill is never moved to another employer or
+    accomplishment. An addition is kept only if it removes the objection without raising
+    another. Returns the packet and a repair log.
+    """
+    index = {e.id: e for e in career.evidence}
+    employer_by_job = {j.id: j.employer.lower() for j in career.employments}
+
+    def employers(e):
+        return {employer_by_job.get(j, '') for j in e.employment_ids} | {e.employer.lower()} - {''}
+    result = packet.model_copy(deep=True)
+    repairs = []
+    for section in ('resume', 'cover_letter'):
+        for claim in getattr(result, section):
+            unknown = [i for i in claim.evidence_ids if i not in index]
+            if unknown and len(unknown) < len(claim.evidence_ids):
+                claim.evidence_ids = [i for i in claim.evidence_ids if i in index]
+                repairs.append({'claim_id': claim.id, 'removed_unknown': unknown})
+            linked = [index[i] for i in claim.evidence_ids if i in index]
+            if not augment or not linked:
+                continue
+            jobs = {j for e in linked for j in e.employment_ids}
+            projects = {e.project for e in linked}
+            named = {name for name in employer_by_job.values() if name and name in claim.text.lower()}
+
+            def allowed(e):
+                if not e.eligible or e.id in claim.evidence_ids:
+                    return False
+                if section == 'resume':
+                    return e.project in projects and bool(jobs & set(e.employment_ids))
+                return bool(employers(e) & named) if named else True
+            current = deterministic_objections(claim.text, linked)
+            for objection in list(current):
+                tool = _repairable(objection)
+                if not tool or objection not in current:
+                    continue
+                for e in sorted((e for e in career.evidence if allowed(e) and _states(e, tool)),
+                                key=lambda e: (e.kind != 'experience', e.id)):
+                    trial = deterministic_objections(claim.text, linked + [e])
+                    if set(trial) < set(current):
+                        linked.append(e)
+                        claim.evidence_ids.append(e.id)
+                        current = trial
+                        repairs.append({'claim_id': claim.id, 'added': e.id, 'resolves': objection.split(' (')[0]})
+                        break
+    return result, repairs
 
 
 def deterministic_objections(text, linked):
@@ -163,11 +235,12 @@ def deterministic_objections(text, linked):
                 issues.append('lost estimated/approximate qualifier')
             if m.get('qualifier') == 'expected' and not qualified_number(text, m['value'], 'expected'):
                 issues.append('expected outcome presented as realized')
-    for verb in ('owned','led','managed','supervised','directed','architected'):
+    for verb in OWNERSHIP_VERBS:
         verb_pattern = r'\b' + verb + (r'\b(?!\s+to\b)' if verb == 'led' else r'\b')
-        if re.search(verb_pattern, low) and not re.search(r'\b' + verb + r'\b', original):
+        if re.search(verb_pattern, low) and not re.search(OWNERSHIP_VERBS[verb], original):
             if verb != 'owned' or not any(e.ownership == 'owned' for e in linked):
-                issues.append('unestablished ownership verb: ' + verb)
+                issues.append(f"unestablished ownership verb: {verb} (the cited sources do not say you {verb} this; "
+                              "use the source's own verb, such as built, designed or contributed to)")
     if re.search(r'\b(doctor|doctorate|doctoral|phd)\b', low) and re.search(r'in progress|dissertation phase|enrolled', original) and not re.search(r'in progress|dissertation|enrolled|student|research', low):
         issues.append('in-progress education qualifier omitted')
     if re.search(r'\b(managed|led|supervised)\s+(a\s+)?(team|staff|employees)|direct reports', low):
@@ -197,8 +270,10 @@ def accepted_assessments(packet, career, raw_assessments):
         if len(linked) != len(claim.evidence_ids) or not all(e.eligible for e in linked):
             reasons.append('missing or uncertain evidence')
         checked = ('wording_supported','metrics_consistent','technology_consistent','scope_consistent','dates_titles_consistent')
-        if not all(getattr(assessment,key) for key in checked):
-            reasons.append('live auditor found an unsupported factual element')
+        failed = [label for key, label in zip(checked, ('wording', 'metrics', 'technology', 'scope', 'dates or titles'))
+                  if not getattr(assessment, key)]
+        if failed:
+            reasons.append('the fact-check reviewer found the ' + ', '.join(failed) + ' not supported by the cited sources')
         quoted = set()
         for quote in assessment.quotes:
             if quote.evidence_id not in claim.evidence_ids or quote.evidence_id not in index:

@@ -260,8 +260,10 @@ def test_evidence_quote_selection_reconstructs_original_text_and_rejects_wrong_s
     assert 'confirmed_statements' not in wire['career']['evidence'][0]
     raw = {'assessments':[{'evidence_ids':['a'], 'quotes':[{'evidence_id':'a','source_quote_id':ident}]}]}
     assert resolve_source_quotes(raw,catalog)['assessments'][0]['quotes'][0] == {'evidence_id':'a','text':text}
-    with pytest.raises(ValueError,match='uncited evidence'):
-        resolve_source_quotes({'assessments':[{'evidence_ids':['b'], 'quotes':[{'evidence_id':'b','source_quote_id':ident}]}]},catalog)
+    # A quote from the wrong record is dropped rather than failing the run; the cited record is
+    # then left unquoted, which the review contract rejects and sends for one correction.
+    wrong = resolve_source_quotes({'assessments':[{'evidence_ids':['b'], 'quotes':[{'evidence_id':'b','source_quote_id':ident}]}]},catalog)
+    assert wrong['assessments'][0]['quotes'] == []
 
 
 def test_selected_shared_quote_resolves_to_every_cited_record_that_contains_it():

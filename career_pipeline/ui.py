@@ -59,11 +59,13 @@ def status_title(status):
 def findings_view(findings, passages=None):
     labels = {'evidence': 'Factual accuracy', 'recruiter': 'Relevance & presentation', 'voice': 'Writing style'}
     passages = passages or {}
-    groups = [('error', 'Must fix', st.error), ('gap', 'Gaps', st.warning), ('suggestion', 'Suggestions', st.info)]
+    groups = [('error', 'Must fix', st.error, lambda f: True), ('gap', 'Gaps', st.warning, lambda f: True),
+              ('suggestion', 'Questions for you', st.warning, lambda f: f.get('code') == 'needs_info'),
+              ('suggestion', 'Suggestions', st.info, lambda f: f.get('code') != 'needs_info')]
     if not findings:
         st.success('No outstanding findings.')
-    for severity, heading, show in groups:
-        selected = [f for f in findings if f['severity'] == severity]
+    for severity, heading, show, belongs in groups:
+        selected = [f for f in findings if f['severity'] == severity and belongs(f)]
         if not selected:
             continue
         st.markdown(f'**{heading}** · {len(selected)}')

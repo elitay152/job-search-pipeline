@@ -104,8 +104,8 @@ def test_led_to_describes_an_outcome_not_personal_leadership():
     c = career()
     e = c.evidence[0].model_copy(update={'confirmed_statements':['Project completion resulted in cancellation of a vendor contract.'],
         'approved_wording':[], 'sources':[], 'fact_details':{}, 'metrics':[]})
-    assert 'unestablished ownership verb: led' not in deterministic_objections('Project completion led to cancellation of a vendor contract.', [e])
-    assert 'unestablished ownership verb: led' in deterministic_objections('Led the vendor cancellation project.', [e])
+    assert not any(o.startswith('unestablished ownership verb: led') for o in deterministic_objections('Project completion led to cancellation of a vendor contract.', [e]))
+    assert any(o.startswith('unestablished ownership verb: led') for o in deterministic_objections('Led the vendor cancellation project.', [e]))
 
 
 def test_reduction_cannot_be_rewritten_as_daily_usage_even_when_numbers_match():
