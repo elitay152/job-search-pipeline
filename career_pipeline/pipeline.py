@@ -173,7 +173,8 @@ def map_requirements(requirements, career, retriever=None):
 def match_payload(requirements, career):
     """Concise evidence for requirement matching: statements and tools, not audit metadata."""
     evidence = [{'id': e.id, 'kind': e.kind, 'project': e.project, 'employer': e.employer,
-                 'title': e.official_title, 'statements': e.supported_wording,
+                 'title': e.official_title, 'statements': e.supported_wording, 'ownership': e.ownership,
+                 'do_not_imply': e.prohibited_inferences,
                  'tools': [f'{t.name} ({t.context})' for t in e.technologies]}
                 for e in career.evidence if e.eligible]
     return {'requirements': [{'id': q.id, 'text': q.text, 'priority': q.priority}
