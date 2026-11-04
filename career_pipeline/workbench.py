@@ -1,4 +1,5 @@
 """Local, persistent evidence updates and readable job-fit summaries for any frontend."""
+import re
 import uuid
 from collections import Counter
 from pathlib import Path
@@ -18,6 +19,15 @@ def save_profile(career, path='local/career.json'):
         temporary.unlink(missing_ok=True)
 
 
+def answer_title(answer, tool=''):
+    """Name a follow-up answer by what the candidate did, not by the job requirement it answered.
+
+    The requirement stays in fact_details; as a title it read like evidence ("Required: Spark")."""
+    first = re.split(r'(?<=[.;!?])\s', ' '.join(answer.split()), maxsplit=1)[0].rstrip('.;!?')
+    title = first if len(first) <= 70 else first[:69].rsplit(' ', 1)[0] + '…'
+    return f'{tool.strip()}: {title}' if tool.strip() and tool.strip().lower() not in title.lower() else title
+
+
 def add_gap_answer(career, requirement, answer, *, role_ids=(), tool='', usage='', context='professional',
                    ownership='contributed', confirmed=True, jd_hash='', path='local/career.json'):
     if not answer.strip():
@@ -27,7 +37,7 @@ def add_gap_answer(career, requirement, answer, *, role_ids=(), tool='', usage='
     if tool.strip() and not usage.strip():
         raise ValueError('Describe how you used the tool.')
     ident = 'answer-' + digest([jd_hash, requirement.text])[:20]
-    evidence = Evidence(id=ident, project=requirement.text[:150], employment_ids=list(role_ids),
+    evidence = Evidence(id=ident, project=answer_title(answer, tool), employment_ids=list(role_ids),
         kind='experience' if role_ids else 'skill' if tool else 'project',
         actions=[answer.strip()], ownership=ownership,
         technologies=[{'name': tool.strip(), 'usage': usage.strip(), 'context': context}] if tool.strip() else [],

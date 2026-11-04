@@ -172,14 +172,17 @@ def map_requirements(requirements, career, retriever=None):
 
 def match_payload(requirements, career):
     """Concise evidence for requirement matching: statements and tools, not audit metadata."""
+    jobs = {j.id: {'employer': j.employer, 'title': j.resume_display_title or j.official_title,
+                   'start': str(j.start), 'end': str(j.end) if j.end else 'present'} for j in career.employments}
     evidence = [{'id': e.id, 'kind': e.kind, 'project': e.project, 'employer': e.employer,
                  'title': e.official_title, 'statements': e.supported_wording, 'ownership': e.ownership,
-                 'do_not_imply': e.prohibited_inferences,
+                 'do_not_imply': e.prohibited_inferences, 'jobs': [jobs[j] for j in e.employment_ids if j in jobs],
                  'tools': [f'{t.name} ({t.context})' for t in e.technologies]}
                 for e in career.evidence if e.eligible]
+    # Full job history (dates included) so years-of-experience requirements are counted, not guessed.
     return {'requirements': [{'id': q.id, 'text': q.text, 'priority': q.priority}
                              for q in requirements if q.kind == 'skill'],
-            'evidence': evidence, 'style': ''}
+            'employment_history': list(jobs.values()), 'evidence': evidence, 'style': ''}
 
 
 def apply_matches(requirements, result, career):
