@@ -153,7 +153,10 @@ def test_ui_mock_workflow(monkeypatch,tmp_path):
     shutil.copytree(root/'writing_style',tmp_path/'writing_style')
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv('CAREER_DB',str(tmp_path/'ui.sqlite'))
-    app=AppTest.from_file(str(root/'career_pipeline/ui.py')).run(timeout=20)
+    app=AppTest.from_file(str(root/'career_pipeline/ui.py'))
+    app.session_state['show_generator']=True
+    app.session_state['page']='Create application'
+    app.run(timeout=20)
     next(b for b in app.button if b.label=='Load synthetic example').click().run(timeout=20)
     next(t for t in app.text_area if t.label=='Paste the job description').set_value((tmp_path/'fixtures/job.txt').read_text()).run(timeout=20)
     next(b for b in app.button if b.label=='Create my draft').click().run(timeout=20)

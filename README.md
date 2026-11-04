@@ -2,6 +2,20 @@
 
 A single-user, evidence-grounded job application workbench for data engineering roles. Python + Pydantic + SQLite + Streamlit, with a CLI and editable DOCX exports. **The bundled candidate and job are synthetic.** No scraping, applications, email sending, or autonomous publishing.
 
+## Match report (default)
+
+Upload or paste your resume once, paste a job posting, and get a report on how well the resume fits:
+a match score (strong counts fully, partial half), each requirement rated strong, partial or missing
+with the resume line that supports it, and up to eight prioritized changes. Changes that would add
+something the resume does not show are asked as questions instead. Requirements are extracted locally;
+one `gpt-5-mini` call judges them (about half a cent and under a minute per report), and every quoted
+resume line is checked against the resume text. Practice mode uses word matching and needs no API key.
+Reports are saved under Report history and download as Markdown. The resume and the reports stay on
+this computer in `local/`.
+
+The earlier resume and cover letter generator remains available behind the sidebar toggle
+"Resume & letter generator (experimental)" and is described below.
+
 The factual gate supports two modes. **Strict** mode requires exact supported source wording.
 **Live-reviewed** mode permits paraphrases only when a separate evidence auditor returns exact
 source quotes and wording/metric/technology/scope/date checks, and independent deterministic guards

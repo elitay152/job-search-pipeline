@@ -23,6 +23,14 @@ def field(app, kind, label):
     return next(element for element in getattr(app, kind) if element.label == label)
 
 
+def open_app(page='Create application', generator=True):
+    # Match report is the default page; the generator pages are behind a sidebar toggle.
+    app = AppTest.from_file(str(ROOT / 'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT)
+    app.session_state['show_generator'] = generator
+    app.session_state['page'] = page
+    return app.run()
+
+
 def go(app, page):
     # Only the selected page is built, so switch pages before using its widgets.
     field(app, 'radio', 'Go to').set_value(page).run()
@@ -30,7 +38,7 @@ def go(app, page):
 
 
 def test_first_use_and_confirmed_evidence_form(workspace):
-    app = AppTest.from_file(str(ROOT / 'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    app = open_app()
     assert not app.exception
     assert field(app, 'button', 'Create my draft').disabled
     assert not any(e.label.startswith('Career evidence JSON') for e in app.text_area)
@@ -50,7 +58,7 @@ def test_first_use_and_confirmed_evidence_form(workspace):
 
 
 def test_mock_application_previews_and_readable_reviews(workspace):
-    app = AppTest.from_file(str(ROOT / 'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    app = open_app()
     field(app, 'button', 'Load synthetic example').click().run()
     field(app, 'text_area', 'Paste the job description').set_value((workspace / 'fixtures/job.txt').read_text()).run()
     assert not field(app, 'button', 'Create my draft').disabled
@@ -66,7 +74,7 @@ def test_mock_application_previews_and_readable_reviews(workspace):
 
 
 def test_employment_form_validates_dates(workspace):
-    app = AppTest.from_file(str(ROOT / 'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    app = open_app()
     go(app, 'My experience')
     field(app, 'text_input', 'Employer').set_value('Example Co')
     field(app, 'text_input', 'Official job title').set_value('Analyst')
@@ -82,7 +90,7 @@ def test_employment_form_validates_dates(workspace):
 
 
 def test_gap_answers_update_library_and_survive_new_session(workspace):
-    app = AppTest.from_file(str(ROOT / 'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    app = open_app()
     field(app, 'button', 'Load synthetic example').click().run()
     field(app, 'text_area', 'Paste the job description').set_value('Required: Kubernetes production administration.').run()
     answer = next(e for e in app.text_area if e.key and e.key.startswith('answer_'))
@@ -93,7 +101,7 @@ def test_gap_answers_update_library_and_survive_new_session(workspace):
     assert not app.exception
     saved = Career.model_validate_json((workspace / 'local/career.json').read_text())
     assert any(e.id.startswith('answer-') and e.eligible for e in saved.evidence)
-    fresh = AppTest.from_file(str(ROOT / 'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    fresh = open_app()
     assert not fresh.exception
     assert any('3' == metric.value for metric in fresh.metric if metric.label == 'Saved source records')
 
@@ -102,7 +110,7 @@ def test_corrupt_library_has_recovery_without_overwrite(workspace):
     target = workspace / 'local/career.json'
     target.parent.mkdir()
     target.write_text('not valid data')
-    app = AppTest.from_file(str(ROOT / 'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    app = open_app()
     assert not app.exception
     assert any('could not be read' in message.value for message in app.warning)
     assert target.read_text() == 'not valid data'
@@ -110,7 +118,7 @@ def test_corrupt_library_has_recovery_without_overwrite(workspace):
 
 def test_approval_replaces_prepared_draft_downloads_with_final_files(workspace):
     from docx import Document
-    app=AppTest.from_file(str(ROOT/'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    app=open_app()
     field(app,'button','Load synthetic example').click().run()
     field(app,'text_area','Paste the job description').set_value((workspace/'fixtures/job.txt').read_text()).run()
     field(app,'button','Create my draft').click().run()
@@ -127,7 +135,7 @@ def test_approval_replaces_prepared_draft_downloads_with_final_files(workspace):
 
 def test_readiness_named_application_and_missing_renderer(workspace, monkeypatch):
     monkeypatch.setattr('shutil.which', lambda name: None)
-    app = AppTest.from_file(str(ROOT/'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    app = open_app()
     field(app, 'button', 'Test selected providers with synthetic data').click().run()
     assert not app.exception
     assert any('Synthetic structured request passed' in s.value for s in app.success)
@@ -144,7 +152,7 @@ def test_readiness_named_application_and_missing_renderer(workspace, monkeypatch
 
 
 def test_top_level_cover_letter_choice_and_plain_job_counts(workspace):
-    app = AppTest.from_file(str(ROOT/'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    app = open_app()
     field(app, 'button', 'Load synthetic example').click().run()
     field(app, 'checkbox', 'Include a cover letter').uncheck()
     field(app, 'text_area', 'Paste the job description').set_value('Experience with Python and SQL ingestion.\nKnowledge of Airflow scheduling.').run()
@@ -159,7 +167,7 @@ def test_top_level_cover_letter_choice_and_plain_job_counts(workspace):
 
 
 def test_no_requirements_shows_empty_state_instead_of_zero_match(workspace):
-    app = AppTest.from_file(str(ROOT/'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    app = open_app()
     field(app, 'button', 'Load synthetic example').click().run()
     field(app, 'text_area', 'Paste the job description').set_value('About the job\nWelcome to our wonderful company.').run()
     assert any('No job requirements were recognized' in w.value for w in app.warning)
@@ -177,7 +185,7 @@ def test_resume_upload_saves_history_without_confirmation_step(workspace, monkey
     for e in imported.evidence:
         for source in e.sources: source.status = 'user_provided'
     monkeypatch.setattr('career_pipeline.resume_intake.extract_resume', lambda *args: (imported, 'Synthetic source text'))
-    app = AppTest.from_file(str(ROOT/'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    app = open_app()
     go(app, 'My experience')
     field(app, 'button', 'Import resume').click().run()
     assert not app.exception
@@ -188,7 +196,7 @@ def test_resume_upload_saves_history_without_confirmation_step(workspace, monkey
 
 
 def test_practical_constraints_do_not_ask_for_preferences(workspace):
-    app = AppTest.from_file(str(ROOT / 'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    app = open_app()
     field(app, 'button', 'Load synthetic example').click().run()
     field(app, 'text_area', 'Paste the job description').set_value(
         'Location: hybrid, two days onsite.\nRequired: Kubernetes experience.'
@@ -204,7 +212,7 @@ def test_failed_run_is_shown_as_failed_without_approval(workspace, monkeypatch):
     def broken(self, task, payload, model):
         raise ValueError('OpenAI response incomplete; no candidate or review accepted')
     monkeypatch.setattr(MockProvider, 'complete', broken)
-    app = AppTest.from_file(str(ROOT / 'career_pipeline/ui.py'), default_timeout=UI_TEST_TIMEOUT).run()
+    app = open_app()
     field(app, 'button', 'Load synthetic example').click().run()
     field(app, 'text_area', 'Paste the job description').set_value((workspace / 'fixtures/job.txt').read_text()).run()
     field(app, 'button', 'Create my draft').click().run()
