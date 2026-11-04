@@ -1,385 +1,110 @@
-# Evidence / Application Studio
+# Application Studio
 
-A single-user, evidence-grounded job application workbench for data engineering roles. Python + Pydantic + SQLite + Streamlit, with a CLI and editable DOCX exports. **The bundled candidate and job are synthetic.** No scraping, applications, email sending, or autonomous publishing.
+See how well your resume fits a job posting, and what to change before you apply.
 
-## Match report (default)
+Application Studio is a small local web app (Python + Streamlit). You give it your resume once, paste a job
+posting, and it produces a match report in about half a minute for well under a cent. It never writes or
+changes your resume for you, and it never suggests claiming experience your resume doesn't show.
 
-Upload or paste your resume once, paste a job posting, and get a report on how well the resume fits:
-a match score (strong counts fully, partial half), each requirement rated strong, partial or missing
-with the resume line that supports it, and up to eight prioritized changes. Changes that would add
-something the resume does not show are asked as questions instead. Requirements are extracted locally;
-one `gpt-5-mini` call judges them (about half a cent and under a minute per report), and every quoted
-resume line is checked against the resume text. Practice mode uses word matching and needs no API key.
-Reports are saved under Report history and download as Markdown. The resume and the reports stay on
-this computer in `local/`.
+## What you get
 
-The earlier resume and cover letter generator remains available behind the sidebar toggle
-"Resume & letter generator (experimental)" and is described below.
+- **Match score**: strong requirements count fully, partial ones half, plus a score for required items only.
+- **Requirement by requirement**: every requirement in the posting rated *strong*, *partial* or *missing*,
+  with the line from your resume that supports it. Each quoted line is checked against your actual resume
+  text, so a strong rating always points at something you wrote.
+- **What to change**: up to eight prioritized suggestions. *Edits* reword or reorder what is already in
+  your resume; *questions* point at requirements your resume doesn't show ("Have you used Airflow?").
+- **Re-score**: edit your resume, upload the new version, and re-score the same job to see which
+  requirements moved and how much the score changed.
+- **Compare jobs**: rank several postings by fit and see which required items each one is still missing.
+- **History and export**: every report is saved locally and downloads as Markdown.
 
-The factual gate supports two modes. **Strict** mode requires exact supported source wording.
-**Live-reviewed** mode permits paraphrases only when a separate evidence auditor returns exact
-source quotes and wording/metric/technology/scope/date checks, and independent deterministic guards
-pass. A valid evidence ID or quote alone is insufficient. Model judgments remain fallible; user-provided source facts are separate from final application approval. Mock reviewers cannot authorize paraphrases.
+Practical details such as location or salary are listed but not scored. The score is a model judgment
+checked against your resume text, not an ATS score or a hiring prediction.
 
-## Setup
+## Setup (Windows)
 
-Python 3.11+ (validated here on Python 3.12). From the checkout root:
-
-On Windows PowerShell, from the repository folder:
+Requires Python 3.11+. From the repository folder in PowerShell:
 
 ```powershell
 py -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m streamlit run career_pipeline/ui.py
 ```
 
-On macOS/Linux:
+Add an OpenAI API key as a Windows user environment variable named `OPENAI_API_KEY` (or
+`CAREER_OPENAI_API_KEY`), then open a new terminal so it is picked up. API usage is billed separately
+from ChatGPT plans; add credits at platform.openai.com → Settings → Billing.
 
-```bash
-python -m venv .venv
-.venv/bin/python -m pip install -e ".[dev]"
-.venv/bin/python -m pytest -q
-.venv/bin/python -m streamlit run career_pipeline/ui.py
-```
-
-Open the local browser address Streamlit prints. `requirements.lock` is the validated cloud
-Python 3.12 snapshot; its NumPy/pandas pins do not support Python 3.11. The commands above
-resolve dependencies compatible with your interpreter. Windows installation has not been run
-in the Linux cloud environment. No credentials are needed in practice mode.
-
-### Use the workbench
-
-Your experience is stored locally and reused on every run; it is not recreated for each job.
-On first use, upload a DOCX/TXT resume in My experience, use its forms, import a private backup,
-or load the clearly labeled synthetic example. Your source facts are saved to `local/career.json`;
-User-entered and uploaded records can generate claims immediately. Role, evidence, tool and metric edits use
-forms. Saving records treats them as user-provided source data; no additional factual-confirmation step is required.
-Back up the evidence file privately. Historical runs keep their original snapshots.
-
-In Create application, paste a job description or load one public HTTPS posting link. Review
-imported text before generating: some sites block access or require JavaScript/login. Paste text
-instead in those cases. The importer follows at most three redirects, limits page size, rejects
-local/private destinations, and does not crawl, log in or bypass site restrictions. Page content
-remains untrusted data. URL handling is tested with simulated responses; site access varies.
-
-The app maps requirements, asks optional gap questions, and saves user-provided factual
-answers to your reusable library. Training, portfolio and academic work retain their context.
-“No relevant experience” and practical preferences are saved separately, never promoted into
-experience. Unanswered gaps remain visible and do not prevent a truthful draft. Generation mode
-can be practice (no credentials), OpenAI, or Anthropic; model, review and writing-profile controls
-are optional advanced settings. A private approved style bundle at
-`private/writing_style/approved-v3` is selected when present; otherwise guidance is a neutral default.
-
-Review & download shows rendered resume/letter previews, readable objections, evidence behind
-passages, revision text diffs and a downloadable report. The report measures evidence coverage,
-not hiring probability or ATS success. Lexical matches and evidence links are not proof of semantic
-coverage. Factual errors prevent approval/final export; a labeled draft remains available. Final
-approval always requires your explicit review. History shows status, latency and available cost.
-JSON is reserved for optional backup/import and the expandable technical audit.
-
-## Synthetic walkthrough
-
-```bash
-.venv/bin/career run --jd fixtures/job.txt --career fixtures/career.json
-.venv/bin/career history
-# Substitute the run ID printed above:
-.venv/bin/career export RUN_ID --career fixtures/career.json --draft
-# Inspect artifacts/RUN_ID/draft, evidence references and audit.json before approving:
-.venv/bin/career approve RUN_ID --career fixtures/career.json --reviewed
-.venv/bin/career export RUN_ID --career fixtures/career.json
-```
-
-The example selects Python/SQL ingestion and Airflow evidence, retains **estimated** savings, and surfaces unsupported Kubernetes experience as a gap; posting logistics do not trigger resume questions. No Kubernetes experience is invented. Drafts are labeled; final export is blocked until the deterministic audit passes and the user acknowledges review. Approval is bound to packet and evidence hashes. The CLI acknowledgement is an explicit user action, not an automated hiring or quality certification.
-
-The UI supports DOCX/TXT resume upload, persisted history, editable experience forms, optional JSON backups, a requirement map, previews, provenance, findings, revision diffs when present, run history, approval, and DOCX/Markdown/audit downloads. Resume and letter text can be edited in DOCX; edits made outside the app are outside its audit boundary. To use edited evidence, paste it into the editor or provide the local JSON to the CLI. Historical UI previews use the saved run snapshot; CLI exports reject an evidence-snapshot mismatch.
-
-## Architecture and data flow
-
-```text
-untrusted JD -> validated ingestion -> excerpt-preserving requirements
-             -> tag/lexical retrieval -> evidence coverage map
-confirmed evidence + approved profile -> provider -> structured packet
-             -> deterministic evidence auditor + recruiter + voice review
-             -> bounded revision -> revalidation -> user review -> exports
-                               \-> SQLite snapshots, versions, findings, telemetry
-```
-
-- `models.py`: employers, official titles/dates, projects, personal actions, ownership, technology usage, qualified metrics, sources, verification, approved wording and prohibited inferences. IDs must be stable and unique. Conflicting dates for the same employer/title are rejected. User-provided and previously confirmed evidence is eligible; legacy uncertain machine-extracted records remain excluded unless explicitly imported or saved by the user.
-- `pipeline.py`: framework-independent orchestration. Requirement extraction is a transparent line/heading baseline, with required/preferred/ambiguous labels and verbatim excerpts. Location and practical constraints are retained as posting context, excluded from resume questions and experience-gap findings; no sensitive personal characteristics are inferred. Retrieval is a replaceable protocol, currently tag and lexical overlap. “Direct” means all non-stopword tokens match available evidence text/tags; “transferable” means partial overlap, **not** a semantic certification. Inspect the map for multi-tool or nuanced requirements.
-- `providers.py`: provider protocol, deterministic mock, Anthropic and OpenAI Chat Completions adapters. Generator/reviewer settings are separate. Approved style instructions are loaded explicitly. Job descriptions, evidence, and reviewer messages remain data in prompts; generated facts still face a deterministic gate. The model reviewer cannot replace the factual auditor. Recruiter objections must reference a known claim and requirement; voice objections require a known claim.
-- `store.py`: SQLite run manifests, input snapshots, version events, rejected revision candidates, and content-addressed stage cache. Cache keys include provider/model, prompt version, settings and full stage payload. Manifests include hashes, schema/prompt/profile versions, model settings, stage latency/status, available usage/cost, revisions, stopping reason, validation, artifact paths and checksums. SQLite contains private content; stdout does not print snapshots.
-- `export.py`: Markdown/DOCX renderer uses official employment metadata with separately user-approved descriptive display titles, excludes internal IDs from application files, and writes a separate audit report. PDF is an optional capability stub returning an explicit unavailable result; no rendering dependency is required.
-
-Every generated revision candidate is persisted. The default revision limit is two, hard maximum three. Stop conditions include resolved actionable findings, limit, repeated/oscillating output, and budgets. Experience gaps remain visible and do not trigger endless edits. Factual failures yield `needs_review`, prevent approval/final export, and permit labeled draft previews. Schema/provider failures yield `failed` with the completed stage history and saved candidate retained. Known deterministic factual errors are repaired before paid review. Unchanged eligible source statements are checked locally; rewritten claims receive batched evidence-model review. Recruiter and voice editors see the complete draft. The audit distinguishes exact source comparisons from model-reviewed claims. Reviewers select numbered source excerpts; the backend resolves their quotations verbatim, including shared excerpts present in multiple cited records. Truncated batches split down to one claim, subject to the same budgets; incomplete review never permits final export.
-
-### Evidence authoring contract
-
-Direct entries and resume imports use `user_provided`; existing `user_confirmed` records remain supported. User input is authoritative for tailoring, not independently verified by this app. The app does not authenticate source documents or infer missing facts. Approved wording and confirmed factual statements are explicit support anchors; neither constitutes approval of a generated packet. Structured fields and source excerpts provide context, not independent proof. Preserve estimated/expected/realized qualifiers, titles, dates, familiarity versus production use, contribution versus ownership, and education status. Do not approve paraphrases implying leadership, database administration or a completed degree without that evidence. `prohibited_inferences` is available to model context and human review; arbitrary natural-language prohibitions are not a semantic rules engine. Strict checks catch deviations from supported source wording; live-reviewed mode additionally validates structured assessments and independent number/unit/qualifier/tool/scope guards. Neither authenticates source facts or proves entailment. The separate evidence reviewer can raise additional factual objections, which block approval.
-
-## Live configuration
-
-Mock is the default. For live calls set environment variables securely (never commit `.env`):
-
-```bash
-export GENERATOR_PROVIDER=anthropic
-export REVIEWER_PROVIDER=anthropic
-export GENERATOR_MODEL=claude-sonnet-4-5
-export REVIEWER_MODEL=claude-sonnet-4-5
-# Set ANTHROPIC_API_KEY through your environment's secure settings.
-.venv/bin/career run --jd private/job.txt --career private/career.json
-```
-
-`TOKEN_BUDGET` and `CALL_BUDGET` configure CLI limits. Python callers can set all `Settings` fields, including maximum output tokens and separate input/output USD-per-million rates. Prices are intentionally not hard-coded: live cost is unavailable unless rates are supplied. Mock usage/cost are zero. Live budgets reserve three attempts and byte-based input/schema bounds plus maximum output, then settle successful calls using reported usage; cached stages consume no new budget. Up to three attempts use short exponential backoff for connection, rate-limit and server errors; authentication and invalid JSON errors fail without unchanged retries. Reservations can stop a run earlier than actual token usage would suggest. Live outputs are not promised to regenerate identically.
-
-The Streamlit controls support separate generator/reviewer models, budgets, local evidence loading and an approved style directory; each selected provider uses its configured key binding. **Live Anthropic calls have not been exercised as part of credential-free validation.** A valid provider key, model access and HTTPS access to its API are required. OpenAI is also supported; see the configuration below.
-
-## Writing profile calibration
-
-`writing_style/` is a portable package: SKILL.md, versioned neutral profile, labeled optional examples and calibration instructions. The application explicitly loads this skill; arbitrary SKILL.md discovery by Claude Code is not assumed. The public profile is a labeled neutral default; personal samples and profiles belong in ignored private storage.
-
-Put selected samples and a manifest under ignored `private/`. Label authorship `user-authored`, `assistant-assisted`, or `explicitly-user-approved`; assistant-assisted samples alone cannot establish the user's voice. Follow [calibration.md](writing_style/calibration.md) to generate an unapproved proposal, inspect its sentence-length observations and synthetic before/after illustration, edit, approve and version it. Calibration is intentionally local and limited; it does not claim to learn personality or a full voice model. Raw examples are never loaded as pipeline instructions. Conversational style remains separate from professional style.
-
-Use the [private-profile workflow](writing_style/private_profiles.md) to approve and version a
-personal package, load it explicitly with `--style`, understand what live providers receive, and
-back it up privately. A [generic profile example](writing_style/examples/profile.generic.example.json)
-supports a credential-free walkthrough without publishing anyone's writing. Sample approval and
-profile approval are separate. The UI now accepts an explicit approved-style directory as well as local evidence JSON.
-Profiles are never selected automatically from local selection notes.
-
-## Evaluation and tests
-
-```bash
-.venv/bin/pytest -q
-.venv/bin/career evaluate --output local/evaluation.json
-```
-
-The small benchmark compares A: full confirmed record one-shot, B: retrieval plus generation, C: retrieval plus bounded review, on a standard job and a prompt-injected variant. It reports measured unsupported-claim rate, manually labeled supported-requirement coverage, wording/metric consistency, title/date rendering consistency, latency, tokens and available cost. Results are **deterministic mock measurements**, not live efficacy or hiring predictions. All arms use the same safe mock; do not infer that review improves quality from equal scores. The independent deterministic holdout judge is separate from the optimizing reviewer. Model judgments, human editing effort and blind human preference are null until supplied; none are fabricated.
-
-`fixtures/adversarial.json` lists absent tools, injected instructions, conflicting dates, realized-versus-estimated savings, invented leadership and unsupported reviewer requests. Tests exercise these boundaries, end-to-end mock execution, uncertain sources, unknown IDs, snapshot gates, revision limits, repeated outputs, DOCX content and UI rendering. The benchmark itself is intentionally small; nuanced retrieval and live-model quality need a larger independently labeled corpus and blinded human evaluation.
-
-### Runtime budgets and document baseline
-
-After pulling an update, install its dependencies into the same virtual environment used by
-Streamlit: `python -m pip install -e ".[dev]"` (use `.\.venv\Scripts\python.exe` in Windows
-PowerShell). OpenAI token reservations use `tiktoken` with a safety margin and settle to reported
-usage. Encoding assets are downloaded on first use; if unavailable, a conservative byte estimate
-is used. Tests do not download tokenizer assets. Configured budgets are never raised automatically.
-Repeated source context is sent once with lossless references. Separate factual and presentation
-review payloads reduce repeated input; GPT-4-family calls use temperature zero, recorded in telemetry.
-
-Employment history, education and publications form a source-backed baseline. Education and publication wording is copied from saved source records; missing anchors
-are restored before review. Shared work under multiple titles at one employer is displayed once
-beneath those titles and dates, with narrower scope labeled when needed. Metric records can state
-whether a value is a level, reduction or increase; an estimated reduction must not become a usage
-level. Uncertainty qualifiers are checked against each relevant number. Later revisions that
-introduce unsupported facts restore previously validated wording, with the rejected edits retained
-in the audit. These checks reduce errors; live model judgments and writing quality still require
-human review. The latest real-resume acceptance run was interrupted by provider credit exhaustion;
-final live verification is incomplete, so this build is not declared application-ready. See [release verification](docs/release-verification.md) for checks actually run.
-
-## Privacy and limits
-
-Local SQLite snapshots, cache, artifacts, personal evidence and samples contain private data. `.gitignore` excludes `local/`, `private/`, `artifacts/`, credentials and databases by default. Do not put personal files in public fixtures or writing_style/examples. Review files before staging. Delete the local database and artifacts to remove retained content; no automatic retention schedule or encryption at rest is implemented. Use a private machine and encrypted storage for sensitive data.
-
-Mock mode makes no model calls. Live mode transmits the job description, selected evidence (the full confirmed record for baseline A), approved profile, packet and findings to the selected provider (Anthropic or OpenAI). Raw writing samples are not sent. Provider retention and account policies apply. No private content is intentionally logged, but provider exception handling by external tooling should be reviewed before deployment. The UI is for a trusted single user: no authentication, multi-user isolation or internet deployment hardening is included. Structured inputs, factual gates and prompt boundaries reduce injection risk but are not a universal injection defense. Source verification and final editorial responsibility remain human tasks.
-
-
-## Adapted resume development guidance
-
-The explicitly loaded [resume guide](writing_style/resume_guidance.md) adapts selected items from
-**ResumeSkills** and **resume-tailoring-skill** only: source-library organization, requirement mapping,
-concrete technical bullets, optional experience discovery, and readable document formatting.
-[Sources and retained MIT notices](writing_style/SOURCES.md) identify the upstream revisions.
-No external skill collection or third-party automation is installed. The other two researched
-projects (Proficiently and Anthropic DOCX) are excluded from this adaptation.
-
-[Detailed guidance](docs/resume-development.md) explains the workflow. The compact model-facing guide
-is loaded along with SKILL.md and profile.json; the combined hash covers all loaded instructions,
-so guidance changes invalidate stage caches. This is general guidance, not sample-learned voice.
-Custom style directories can omit the optional guide for backward compatibility; copy it and its
-attribution/licenses if you want the adapted guidance in your custom package.
-
-Optional discovery questions for weak/unsupported requirements are persisted in each run manifest
-and shown in the UI. They are prompts for separate evidence editing, not automatically confirmed
-answers or an extension of revision limits. A genuine experience gap can stay a gap.
-
-For descriptive resume headings, set `resume_display_title` and
-`resume_display_title_approved: true` in the evidence JSON **only after user approval**. The
-`official_title` remains unchanged for audit and employment verification. Unapproved display titles
-fail input validation. This does not authorize invented seniority or responsibilities.
-
-Resume exports group accomplishments for the same role, use month/year display dates, native Word
-bullets, US Letter pages, 11-point body text and consistent margins/spacing. Visual pagination and
-live-model response quality have not been validated by these changes; DOCX text/style checks and
-mock/UI tests are covered. Arbitrary page-count and ATS pass guarantees are intentionally absent.
-
-Mock requests reserve one dry-run attempt rather than three live retry attempts; mock telemetry
-still reports zero actual provider tokens/cost. Live instructions appear once in the system prompt,
-not duplicated in user data. Prompt versions record these serialization changes.
-
-
-## Personal pipeline and adversarial review
-
-See [the integrated pipeline guide](docs/pipeline-review.md) for month-precision dates, importing
-private scoped confirmations, education/publication records, categorized skills, independent review
-roles, reviewing an existing packet, inspecting saved findings and using the approval/export gates.
-The UI uses saved input snapshots for historical runs. All three reviews must complete before
-approval; model factual errors cannot be waived by the deterministic auditor or vice versa.
-Software tests include a deficient-packet regression that catches thin role coverage, missing
-publications/education and missing skills, revises, and revalidates through the actual pipeline.
-Live OpenAI checks and their limits are recorded in the release-verification document; they are not a broad quality benchmark or a guarantee that every generation will pass.
-
-
-## OpenAI provider
-
-Select OpenAI independently for generator and reviewer. Default OpenAI model: `gpt-4.1`; override
-it with `GENERATOR_MODEL` / `REVIEWER_MODEL` or the corresponding CLI/UI fields. Model availability
-and API billing depend on your account; a ChatGPT subscription alone is not API access.
-
-```bash
-# Put the API credential in secure environment settings, never here or in Git.
-export GENERATOR_PROVIDER=openai
-export REVIEWER_PROVIDER=openai
-.venv/bin/career run --jd private/job.txt --career private/career-v1.json \
-  --style private/writing_style/approved-v1 --report private/openai-review.md
-```
-
-The adapter uses the official OpenAI SDK Chat Completions API with strict function-result schemas,
-separate reviewer-role prompts, bounded transient retries and actual reported token usage. All
-existing factual/semantic assessment and final approval gates apply to OpenAI too. Tests use
-mocked HTTP transport; they do not establish live authentication or response quality.
-
-For a new cloud configuration, use the non-reserved variable `CAREER_OPENAI_API_KEY`. Local
-installations also support the standard `OPENAI_API_KEY`; cloud settings reserve names beginning
-with `OPENAI_`. Existing bindings can be used explicitly with `CAREER_OPENAI_KEY_VARIABLE` set
-to that binding's variable **name**, not its value. The binding must allow `api.openai.com` and
-network policy must allow the same hostname. The app does not copy credentials or infer which
-provider a key belongs to.
-
-When a key was originally saved under a differently named binding, preserve it rather than adding
-a duplicate. Edit the existing binding's allowed destination in environment settings. For example,
-a binding named `ANTHROPIC_API_KEY` that actually contains an OpenAI key can be selected with
-`CAREER_OPENAI_KEY_VARIABLE=ANTHROPIC_API_KEY` and allowed at `api.openai.com`. This is explicit
-migration configuration; Anthropic still requires a genuine Anthropic key if selected later.
-Draft saves do not apply runtime changes; review/save and publish when required by the UI.
-Do not broaden the key's destinations to unrelated hosts or extract proxy-held values.
-
-### Writing-quality checks
-
-Live runs also apply presentation heuristics, separately from factual validation. They flag short
-experience fragments, source-record labels, repeated passages, scientific notation, role chronology,
-passages spanning employers, omitted selected skill categories and ledger-like cover letters.
-Selected education/publication omissions remain part of document review. These suggestions enter
-the existing bounded revision loop; unresolved presentation suggestions can be reviewed and approved,
-whereas factual errors still block final export. No check rewrites a fact automatically.
-
-Under Writing style & advanced settings, disable the checks or adjust minimum bullet/letter word
-preferences. Python callers can also configure repetition similarity and individual check groups
-through `Settings.content_quality`. The minimum letter-word preference defaults to disabled;
-length alone does not establish quality. Practice runs report quality as not assessed. Old run
-reports display not recorded, rather than retroactively claiming checks ran.
-
-### Readiness and release checks
-
-The sidebar shows the running commit (or installed package version). In **Provider readiness**,
-key presence means only that a value is configured. **Test selected providers with synthetic data**
-makes one small structured request for the generator and one for the reviewer, using fictional
-facts only. These requests can incur API charges and are separate from the application budget.
-A successful test verifies that configuration, not the quality or completion of a larger run.
-The panel explains call counts and conservative token reservations before generation.
-
-Enter optional company and role names to identify saved applications. Match reports retain job
-excerpts, evidence IDs and linked passages, and distinguish lexical coverage from model findings.
-Practical constraints remain separate from career evidence. No summary predicts hiring outcomes.
-
-The full audit is downloadable even if document export fails. Invalid hidden characters are
-flagged during review; labeled drafts show visible replacement marks and retain originals in the
-audit. Final approval blocks invalid text. Review the audit locally: it includes private content.
-
-### Optional PDF and layout inspection
-
-Editable DOCX and Markdown do not require a PDF renderer. To enable local PDF conversion,
-install LibreOffice and ensure `soffice` or `libreoffice` is on PATH. For page geometry checks:
+Start the app:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -e ".[layout]"
+.\.venv\Scripts\python.exe -m streamlit run career_pipeline/ui.py --server.address localhost
 ```
 
-On Linux/macOS use `.venv/bin/python -m pip install -e '.[layout]'`.
-In **Review & download → Optional PDF & layout review**, render the current documents. Page-count
-preferences, dense-text, possible clipping and possible orphaned-heading warnings are heuristics,
-not a visual-quality guarantee. Download and open the PDFs before recording visual review.
-That acknowledgement is bound to PDF hashes and document version; it never bypasses factual
-approval. Missing dependencies or conversion failures leave DOCX/Markdown available.
+and open http://localhost:8501. Without a key you can still try **Practice** mode, which only counts
+shared words.
 
-CLI equivalents:
+On macOS/Linux, use `python -m venv .venv` and `.venv/bin/python` in the same commands.
 
-```text
-career check-provider --provider openai --model gpt-4.1 --role generator
-career check-provider --provider openai --model gpt-4.1 --role reviewer
-career layout RUN_ID --draft
+### Start automatically at login (optional)
+
+Save this as `Application Studio.vbs` in `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`,
+changing the folder path to your checkout:
+
+```vb
+Set shell = CreateObject("WScript.Shell")
+shell.CurrentDirectory = "C:\path\to\job-search-pipeline"
+shell.Run "cmd /c .venv\Scripts\python.exe -m streamlit run career_pipeline\ui.py" & _
+    " --server.headless true --server.address localhost --server.port 8501 --server.runOnSave true" & _
+    " > local\streamlit.log 2>&1", 0, False
 ```
 
-Run `python -m pip install -e ".[dev,layout]"` and `python -m pytest -q` to test.
-CI is configured for Windows and Ubuntu on Python 3.11 and 3.12. A workflow configuration is not
-proof those jobs passed; inspect GitHub Actions before release. See
-[release verification](docs/release-verification.md) for measured checks and remaining verification.
+It runs the app in the background on http://localhost:8501, only reachable from your computer, and
+reloads it when the code changes. Delete the file to stop auto-starting. Double-click it to start the
+app without logging out.
 
-If presentation edits introduce new review errors after a packet has passed, the pipeline restores
-that exact passing packet and stops. Both the rejected edit and restored version remain in the
-audit. Restoring a version does not mark it user-approved or remove unresolved presentation gaps.
+## Cost and privacy
 
-At the top of **Create application**, **Include a cover letter** controls which documents are
-created. Clear it for a resume-only run; the selection is saved with the run and honored by
-review, approval, and export. The CLI equivalent is `career run ... --resume-only`.
-Existing runs retain their original document selection.
+- One `gpt-5-mini` request per report: typically $0.003–$0.006 and 25–40 seconds.
+- Your resume and the job posting are sent to OpenAI for that request. API data is not used for
+  training under OpenAI's API terms.
+- Everything else stays on your computer in `local/` (ignored by Git): the resume you use for
+  reports, all reports, and the cache.
 
-Job intake recognizes ordinary qualification/responsibility lines, numbered lists and Markdown
-headings. If no requirements are recognized, the UI explains that extraction is empty instead
-of showing a misleading zero-match summary. Coverage remains lexical and should be reviewed.
+## How it works
 
-Confirmed work history is retained independently of job-description keyword matching. Retrieval
-chooses relevant evidence within each employment scope; it cannot remove every job when a posting
-has unfamiliar wording. A resume missing a confirmed employment scope is marked incomplete and
-blocked from final approval/export. Uncertain evidence remains excluded. Old runs are preserved;
-create a new run to use the updated selection and document options.
+1. **Requirements** are pulled from the posting locally, without a model. Job-board page text, section
+   headings, hashtags, benefits and legal boilerplate are skipped; location, salary, clearance and
+   work-authorization lines are kept apart as practical details.
+2. **One model call** rates each requirement against your resume and drafts the suggestions, using a strict
+   JSON schema.
+3. **Local checks** keep the report honest: every quote must appear in your resume (a lightly reworded
+   quote is mapped to your real line; an invented one cannot support a strong rating), requirement IDs are
+   removed from the text, and the number of suggestions is capped.
+4. **Scoring** happens locally from the checked ratings.
 
-### Saved resume baseline
+The main code is in `career_pipeline/match_report.py` (report engine), `career_pipeline/pipeline.py`
+(requirement extraction) and `career_pipeline/ui.py` (the app).
 
-**My experience → Employment history** is the source of resume job sections. The renderer always
-includes those jobs in reverse chronological order with saved dates and official or explicitly
-approved descriptive titles, even if the generated packet supplies no bullet for a job. Older
-imports with confirmed employment metadata on evidence are supported without migrating the file.
-Each run saves a versioned, hashed employment baseline alongside its evidence snapshot.
+## Development
 
-Tailoring selects and rewrites supported bullets within that fixed history. Evidence shared across
-roles remains explicitly labeled as shared work under each referenced job, rather than silently claiming exclusive scope.
-If tailoring omits a job, an exact source bullet is restored before review with its evidence reference.
-A saved role without source bullets stops generation; empty job sections cannot be exported. Historical run snapshots remain unchanged when the current history is edited.
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
 
+Tests use synthetic data and simulated model responses; they never call a paid API. GitHub Actions runs
+them on every pull request.
 
-### Import a resume, not a JSON file
+## Experimental: resume and cover letter generator
 
-In **My experience**, upload a DOCX or UTF-8 TXT resume using **Load a resume as my history**,
-then select **Import resume**. OpenAI or Anthropic extracts the history into internal structured
-records. This requires a configured provider key and sends the uploaded resume text to that
-provider. The UI saves the original locally under `local/resume_sources/` and saves the structured
-history automatically. JSON import/export remains available as a backup option.
+The earlier version of this project wrote tailored resumes and cover letters from a library of your
+experience, with fact-checking against your sources. It works but is slower (several minutes), costs
+about 15–20 cents per application, and its documents still needed heavy editing. It is available behind
+the sidebar switch **Resume & letter generator (experimental)**, and from the `career` command line tool.
+See [the generator guide](docs/archive/generator-guide.md); its planning notes are in
+[docs/archive](docs/archive/).
 
-Imported and manually entered facts are usable immediately as `user_provided` sources. No fact-by-fact
-confirmation checkbox is required. Checks compare extraction/output to the input: invented or changed
-source wording, mismatched job dates, wrong-role bullet placement and jobs without source bullets
-are rejected. Missing month/year dates must be supplied in the source rather than guessed.
-Existing history is merged without deleting saved records; conflicting dates require editing the
-saved role. PDF/OCR intake is not currently supported; export an editable DOCX or TXT first.
+## License
 
-CLI: `career import-resume --file resume.docx --provider openai --output local/career.json`.
-Final application approval remains separate: it acknowledges review of generated output, not the
-truth of each input record.
-
-Offline regression checks run with real HTTP transports blocked: `python -m pytest -q` cannot
-fall through to a paid OpenAI or Anthropic call. The OpenAI workbench acceptance test uses synthetic
-HTTP responses to exercise revision, truncated-review recovery, approval, and both DOCX downloads.
-This checks application behavior, not live writing quality. See
-[release verification](docs/release-verification.md) for the current live-test limitations.
+MIT. See [LICENSE](LICENSE). The generator's writing guidance adapts two MIT-licensed projects; see
+`writing_style/SOURCES.md`.

@@ -22,9 +22,9 @@ from career_pipeline.readiness import app_version, check_provider, budget_plan
 from career_pipeline.baseline import missing_source_jobs
 from career_pipeline.ui_errors import configuration_problem, failure_message
 from career_pipeline.duplicates import duplicate_groups, merge_duplicates
-from career_pipeline.match_report import build_report, report_markdown
+from career_pipeline.match_report import build_report, compare_reports, report_label, report_markdown
 
-REPORT_PAGES = ['Match report', 'Report history']
+REPORT_PAGES = ['Match report', 'Report history', 'Compare jobs']
 GENERATOR_PAGES = ['Create application', 'My experience', 'Review & download', 'Draft history']
 MATCH_COLORS = {'strong': 'green', 'partial': 'orange', 'missing': 'red'}
 REPORT_RESUME = Path('local/report_resume.json')  # The resume used for reports, kept on this computer.
@@ -136,6 +136,18 @@ STYLE = """
 .rec.question .tag {color: #F59E0B;}
 .rec .action {color: #F1F5F9; font-weight: 600; margin: .15rem 0;}
 .rec .why {color: #94A3B8; font-size: .9rem;}
+.delta {padding: .8rem 1.1rem; border-radius: .8rem; margin-bottom: 1rem; border: 1px solid #25324D;
+        background: linear-gradient(90deg, rgba(45, 212, 191, .14), rgba(21, 31, 51, .9));}
+.delta.down {background: linear-gradient(90deg, rgba(244, 63, 94, .14), rgba(21, 31, 51, .9));}
+.delta b {color: #F8FAFC;} .delta li {color: #CBD5E1;}
+.bar-row {display: grid; grid-template-columns: 2.2rem minmax(10rem, 1.3fr) 3fr 3.5rem; gap: .75rem; align-items: center;
+          padding: .55rem .2rem; border-bottom: 1px solid #25324D;}
+.bar-row .rank {color: #94A3B8; font-weight: 800;}
+.bar-row .job {color: #F1F5F9; font-weight: 600;}
+.bar-row .job small {display: block; color: #94A3B8; font-weight: 400;}
+.bar {height: .7rem; border-radius: 999px; background: #25324D; overflow: hidden;}
+.bar div {height: 100%; border-radius: 999px;}
+.bar-row .pct {font-weight: 800; text-align: right;}
 </style>
 """
 MATCH_TEXT = {'strong': '#6EE7B7', 'partial': '#FCD34D', 'missing': '#FDA4AF'}
@@ -165,6 +177,15 @@ def report_view(report):
         f'<span class="pill strong">{score["strong"]} strong</span><span class="pill partial">{score["partial"]} partial</span>'
         f'<span class="pill missing">{score["missing"]} missing</span>{required}'
         f'<p>{escape(report["summary"])}</p></div></div>', unsafe_allow_html=True)
+    changes = report.get('changes')
+    if changes:
+        delta = changes['score_change']
+        moved = ''.join(f"<li>{escape(m['requirement'][:90])}: {m['from']} → <b>{m['to']}</b></li>"
+                        for m in changes['improved'] + changes['worse'])
+        st.markdown(f'<div class="delta{" down" if delta < 0 else ""}"><b>{delta:+d} points</b> since your previous version '
+                    f"({escape(changes['previous_created'][:10])}): {len(changes['improved'])} improved, "
+                    f"{len(changes['worse'])} worse.{'<ul>' + moved + '</ul>' if moved else ''}</div>",
+                    unsafe_allow_html=True)
     st.caption('Strong matches count fully and partial matches half. A model judgment checked against your resume text, '
                'not an ATS score or hiring prediction.')
     st.markdown('#### What to change')
@@ -310,6 +331,22 @@ if page == 'Match report':
     if shown:
         with st.container(border=True):
             report_view(shown)
+            st.markdown('#### Edited your resume?')
+            unchanged = bool(current) and digest(current['text']) == shown['resume_hash']
+            st.caption('Upload or paste the new version under "1. Your resume", then re-score this job to see what changed.'
+                       if unchanged else f"Re-score this job with **{current['name'] if current else 'your resume'}**.")
+            rescore_problem = configuration_problem(shown['provider'])
+            if st.button('Re-score with my current resume', disabled=unchanged or not current or bool(rescore_problem)):
+                try:
+                    with st.spinner('Re-scoring with your updated resume…'):
+                        updated = build_report(shown['job_description'], current['text'], store, shown['provider'],
+                                               application=shown['application'], resume_name=current['name'], previous=shown)
+                    st.session_state.report_id = updated['id']
+                    st.rerun()
+                except ValueError as exc:
+                    validation_message(exc)
+                except Exception as exc:
+                    st.error(failure_message(exc))
 
 elif page == 'Report history':
     hero('Report history', 'Every match report you have run, newest first.')
@@ -323,11 +360,46 @@ elif page == 'Report history':
             percent = r['score']['overall'] or 0
             info_col.markdown(f'**{escape(label)}** &nbsp;<span class="pill" style="background:{score_color(percent)}26;'
                               f'color:{score_color(percent)}">{percent}% match</span>', unsafe_allow_html=True)
-            info_col.caption(f"{r['created'][:16].replace('T', ' ')} · {r['model']} · {r.get('resume_name', '')}")
+            rescored = f" · re-scored {r['changes']['score_change']:+d}" if r.get('changes') else ''
+            info_col.caption(f"{r['created'][:16].replace('T', ' ')} · {r['model']} · {r.get('resume_name', '')}{rescored}")
             if action_col.button('Open', key='report_' + r['id']):
                 st.session_state.report_id = r['id']
                 go_to('Match report')
                 st.rerun()
+
+elif page == 'Compare jobs':
+    hero('Compare jobs', 'Rank postings by how well your resume fits, and see what each one still needs.')
+    reports = store.reports()
+    if len(reports) < 2:
+        st.info('Create match reports for at least two jobs to compare them.')
+    else:
+        # Default to the newest report for each posting, so re-scores do not crowd out other jobs.
+        latest = list({r['job_hash']: r for r in reversed(reports)}.values())[::-1]
+        labels = {r['id']: f"{report_label(r)} · {r['created'][:10]} · {r['score']['overall']}%" for r in reports}
+        chosen = st.multiselect('Reports to compare', list(labels), default=[r['id'] for r in latest[:6]],
+                                format_func=labels.get, max_selections=10)
+        rows = compare_reports([r for r in reports if r['id'] in chosen])
+        bars = ''.join(
+            f'<div class="bar-row"><div class="rank">#{n}</div>'
+            f'<div class="job">{escape(row["job"])}<small>{row["created"][:10]} · {row["strong"]} strong, '
+            f'{row["partial"]} partial, {row["missing"]} missing</small></div>'
+            f'<div class="bar"><div style="width:{row["overall"]}%;background:{score_color(row["overall"])}"></div></div>'
+            f'<div class="pct" style="color:{score_color(row["overall"])}">{row["overall"]}%</div></div>'
+            for n, row in enumerate(rows, 1))
+        if bars:
+            st.markdown(f'<div class="score-card" style="display:block">{bars}</div>', unsafe_allow_html=True)
+        for n, row in enumerate(rows, 1):
+            gaps = row['required_gaps']
+            with st.expander(f"#{n} {row['job']} — {len(gaps)} required item{'s' if len(gaps) != 1 else ''} missing"):
+                st.caption('Required: ' + ('n/a' if row['required'] is None else f"{row['required']}%"))
+                for gap in gaps:
+                    st.markdown('- ' + gap)
+                if not gaps:
+                    st.caption('No required items are missing.')
+                if st.button('Open report', key='compare_' + row['id']):
+                    st.session_state.report_id = row['id']
+                    go_to('Match report')
+                    st.rerun()
 
 elif page == 'My experience':
     st.header('My experience')

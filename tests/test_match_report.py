@@ -70,7 +70,7 @@ def test_report_needs_a_resume_and_requirements(tmp_path):
 def test_match_report_page_runs_a_practice_report(workspace):
     app = open_app('Match report', generator=False)
     assert not app.exception
-    assert [o for o in field(app, 'radio', 'Go to').options] == ['Match report', 'Report history']
+    assert [o for o in field(app, 'radio', 'Go to').options] == ['Match report', 'Report history', 'Compare jobs']
     assert field(app, 'button', 'Create match report').disabled  # No resume yet.
     field(app, 'text_area', 'Resume text').set_value(RESUME).run()
     field(app, 'button', 'Use pasted text').click().run()
@@ -96,3 +96,38 @@ def test_reworded_quote_maps_to_the_real_line_and_ids_become_words():
     assert rows[0]['resume_quote'].startswith('Built Python and SQL batch ingestion pipelines')
     assert 'q1' not in rows[0]['note'] and '"Python and SQL ingestion pipelines…"' in rows[0]['note']
     assert 'q2' not in recommendations[0]['reason'] and 'Kubernetes administration' in recommendations[0]['reason']
+
+
+def test_rescore_records_what_changed_and_compare_ranks_jobs(tmp_path):
+    from career_pipeline.match_report import compare_reports
+    store = Store(str(tmp_path / 'r.sqlite'))
+    first = build_report(JD, RESUME, store, 'mock', application={'company': 'Example Co'})
+    edited = RESUME + '\n- Administered Kubernetes production clusters for batch ingestion services.'
+    second = build_report(JD, edited, store, 'mock', application={'company': 'Example Co'}, previous=first)
+    changes = second['changes']
+    assert changes['previous_id'] == first['id'] and changes['score_change'] > 0
+    assert any('Kubernetes' in m['requirement'] and m['from'] == 'missing' for m in changes['improved'])
+    assert '## Since the previous version' in report_markdown(second)
+    other = build_report('Required: Terraform infrastructure as code\nRequired: Go services', RESUME, store, 'mock',
+                         application={'company': 'Other Co'})
+    rows = compare_reports([first, other, second])
+    assert [row['id'] for row in rows][0] == second['id'] and rows[-1]['id'] == other['id']
+    assert rows[-1]['required_gaps']
+
+
+def test_rescore_and_compare_pages(workspace):
+    app = open_app('Match report', generator=False)
+    field(app, 'text_area', 'Resume text').set_value(RESUME).run()
+    field(app, 'button', 'Use pasted text').click().run()
+    field(app, 'text_area', 'Paste the job description').set_value(JD)
+    field(app, 'radio', 'Model').set_value('Practice (free, word matching only)').run()
+    field(app, 'button', 'Create match report').click().run()
+    assert field(app, 'button', 'Re-score with my current resume').disabled  # Same resume as the report.
+    field(app, 'text_area', 'Resume text').set_value(RESUME + '\n- Administered Kubernetes production clusters.').run()
+    field(app, 'button', 'Use pasted text').click().run()
+    field(app, 'button', 'Re-score with my current resume').click().run()
+    assert not app.exception
+    assert any('since your previous version' in m.value for m in app.markdown)
+    field(app, 'radio', 'Go to').set_value('Compare jobs').run()
+    assert not app.exception
+    assert any('bar-row' in m.value for m in app.markdown)
