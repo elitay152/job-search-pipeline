@@ -78,7 +78,7 @@ def test_match_report_page_runs_a_practice_report(workspace):
     field(app, 'radio', 'Model').set_value('Practice (free, word matching only)').run()
     field(app, 'button', 'Create match report').click().run()
     assert not app.exception
-    assert any(m.label == 'Match' for m in app.metric)
+    assert any('score-card' in m.value for m in app.markdown)
     assert (workspace / 'local/report_resume.json').exists()
     field(app, 'radio', 'Go to').set_value('Report history').run()
     assert any('% match' in m.value for m in app.markdown)

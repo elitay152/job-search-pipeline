@@ -1,10 +1,12 @@
 """Human-facing workbench; pipeline and factual gates remain independent of Streamlit."""
 import difflib
+from html import escape
 import json
 import os
 import uuid
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 from pydantic import ValidationError
 
@@ -105,37 +107,86 @@ def save_resume(name, text):
     REPORT_RESUME.write_text(json.dumps({'name': name, 'text': text}), encoding='utf-8')
 
 
+STYLE = """
+<style>
+.hero {padding: 1.5rem 1.75rem; border-radius: 1.1rem; margin: 0 0 1.25rem;
+       background: linear-gradient(115deg, #0EA5E9 0%, #6366F1 50%, #C026D3 100%);
+       box-shadow: 0 10px 30px rgba(99, 102, 241, .25);}
+.hero h1 {margin: 0; padding: 0; font-size: 2rem; color: #fff;}
+.hero p {margin: .35rem 0 0; color: rgba(255, 255, 255, .9); font-size: 1.05rem;}
+.score-card {display: flex; flex-wrap: wrap; gap: 1.75rem; align-items: center; padding: 1.25rem 1.5rem;
+             border-radius: 1rem; background: #151F33; border: 1px solid #25324D; margin-bottom: 1rem;}
+.ring {--p: 0; --c: #2DD4BF; width: 128px; height: 128px; border-radius: 50%; flex: none; display: grid;
+       place-items: center; background: conic-gradient(var(--c) calc(var(--p) * 1%), #25324D 0);}
+.ring span {width: 100px; height: 100px; border-radius: 50%; background: #151F33; display: grid;
+            place-items: center; font-size: 2rem; font-weight: 800; color: #F8FAFC;}
+.score-text {flex: 1; min-width: 240px;}
+.score-text h3 {margin: 0 0 .25rem; color: #F8FAFC;}
+.score-text .meta {color: #94A3B8; font-size: .85rem; margin-bottom: .6rem;}
+.pill {display: inline-block; padding: .2rem .7rem; border-radius: 999px; font-size: .85rem; font-weight: 700;
+       margin: 0 .35rem .35rem 0;}
+.pill.strong {background: rgba(16, 185, 129, .18); color: #6EE7B7;}
+.pill.partial {background: rgba(245, 158, 11, .18); color: #FCD34D;}
+.pill.missing {background: rgba(244, 63, 94, .18); color: #FDA4AF;}
+.pill.required {background: rgba(125, 211, 252, .15); color: #7DD3FC;}
+.rec {padding: .85rem 1.1rem; border-radius: .8rem; background: #151F33; border: 1px solid #25324D;
+      border-left: 5px solid #2DD4BF; margin-bottom: .6rem;}
+.rec.question {border-left-color: #F59E0B;}
+.rec .tag {font-size: .72rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #2DD4BF;}
+.rec.question .tag {color: #F59E0B;}
+.rec .action {color: #F1F5F9; font-weight: 600; margin: .15rem 0;}
+.rec .why {color: #94A3B8; font-size: .9rem;}
+</style>
+"""
+MATCH_TEXT = {'strong': '#6EE7B7', 'partial': '#FCD34D', 'missing': '#FDA4AF'}
+
+
+def hero(title, subtitle):
+    st.markdown(f'<div class="hero"><h1>{escape(title)}</h1><p>{escape(subtitle)}</p></div>', unsafe_allow_html=True)
+
+
+def score_color(percent):
+    return '#10B981' if percent >= 75 else '#F59E0B' if percent >= 50 else '#F43F5E'
+
+
 def report_view(report):
     info = report['application']
-    st.subheader(' — '.join(v for v in (info.get('company'), info.get('role')) if v) or 'Job match report')
+    title = ' — '.join(v for v in (info.get('company'), info.get('role')) if v) or 'Job match report'
     cost = report.get('estimated_cost')
-    st.caption(f"{report['created'][:16].replace('T', ' ')} · {report['model']}"
-               + (f" · {report['resume_name']}" if report.get('resume_name') else '')
-               + (f' · cost ${cost:.3f}' if cost else ''))
+    meta = (f"{report['created'][:16].replace('T', ' ')} · {report['model']}"
+            + (f" · {report['resume_name']}" if report.get('resume_name') else '')
+            + (f' · ${cost:.3f}' if cost else ''))
     score = report['score']
-    cols = st.columns(4)
-    cols[0].metric('Match', f"{score['overall']}%", help='Strong matches count fully and partial matches count half. '
-                   'A model judgment checked against your resume text, not an ATS score or hiring prediction.')
-    cols[1].metric('Required items', 'n/a' if score['required'] is None else f"{score['required']}%",
-                   help=f"Of the {score['required_total']} requirements the posting marks as required.")
-    cols[2].metric('Strong / partial', f"{score['strong']} / {score['partial']}")
-    cols[3].metric('Missing', score['missing'])
-    if report['summary']:
-        st.write(report['summary'])
+    overall = score['overall'] or 0
+    required = '' if score['required'] is None else f'<span class="pill required">{score["required"]}% of required</span>'
+    st.markdown(
+        f'<div class="score-card"><div class="ring" style="--p:{overall};--c:{score_color(overall)}"><span>{overall}%</span></div>'
+        f'<div class="score-text"><h3>{escape(title)}</h3><div class="meta">{escape(meta)}</div>'
+        f'<span class="pill strong">{score["strong"]} strong</span><span class="pill partial">{score["partial"]} partial</span>'
+        f'<span class="pill missing">{score["missing"]} missing</span>{required}'
+        f'<p>{escape(report["summary"])}</p></div></div>', unsafe_allow_html=True)
+    st.caption('Strong matches count fully and partial matches half. A model judgment checked against your resume text, '
+               'not an ATS score or hiring prediction.')
     st.markdown('#### What to change')
     st.caption('Questions point at experience your resume does not show; answer them for yourself. '
                'Skip any edit that would add something you have not actually done.')
     if not report['recommendations']:
         st.caption('No changes suggested.')
-    for n, r in enumerate(report['recommendations'], 1):
-        (st.warning if r['kind'] == 'question' else st.info)(
-            f"**{n}. {'Question: ' if r['kind'] == 'question' else ''}{r['action']}**\n\n{r['reason']}")
+    cards = ''.join(
+        f'<div class="rec {r["kind"]}"><div class="tag">{n} · {"Question" if r["kind"] == "question" else "Edit"}</div>'
+        f'<div class="action">{escape(r["action"])}</div><div class="why">{escape(r["reason"])}</div></div>'
+        for n, r in enumerate(report['recommendations'], 1))
+    if cards:
+        st.markdown(cards, unsafe_allow_html=True)
     st.markdown('#### Requirement by requirement')
     order = {'missing': 0, 'partial': 1, 'strong': 2}
     rows = sorted(report['requirements'], key=lambda r: (order[r['match']], r['priority'] != 'required'))
-    st.dataframe([{'Match': r['match'].title(), 'Priority': r['priority'].title(), 'Requirement': r['requirement'],
-                   'In your resume': r['resume_quote'], 'Note': r['note']} for r in rows],
-                 hide_index=True, width='stretch',
+    table = pd.DataFrame([{'Match': r['match'].title(), 'Priority': r['priority'].title(), 'Requirement': r['requirement'],
+                           'In your resume': r['resume_quote'], 'Note': r['note']} for r in rows])
+    if not table.empty:
+        table = table.style.map(lambda value: f"color: {MATCH_TEXT.get(str(value).lower(), 'inherit')}; font-weight: 700",
+                                subset=['Match'])
+    st.dataframe(table, hide_index=True, width='stretch',
                  column_config={'Requirement': st.column_config.TextColumn(width='large'),
                                 'In your resume': st.column_config.TextColumn(width='large')})
     if report['practical_constraints']:
@@ -145,6 +196,7 @@ def report_view(report):
 
 
 st.set_page_config(page_title='Application Studio', layout='wide')
+st.markdown(STYLE, unsafe_allow_html=True)
 store = Store(os.getenv('CAREER_DB', 'local/pipeline.sqlite'))
 if 'career' not in st.session_state:
     path = next((p for p in (Path('local/career.json'), Path('private/career-v3.json')) if p.exists()), Path('local/career.json'))
@@ -198,7 +250,7 @@ if show_generator and st.session_state.get('library_error'):
     st.warning('The saved experience library could not be read. The original file is untouched. Import a valid backup from the sidebar before continuing.')
 
 if page == 'Match report':
-    st.header('Match your resume to a job')
+    hero('Match your resume to a job', 'See how well you fit, what to change, and what to ask yourself before you apply.')
     with st.container(border=True):
         st.subheader('1. Your resume')
         current = saved_resume()
@@ -260,7 +312,7 @@ if page == 'Match report':
             report_view(shown)
 
 elif page == 'Report history':
-    st.header('Report history')
+    hero('Report history', 'Every match report you have run, newest first.')
     reports = store.reports()
     if not reports:
         st.info('No reports yet. Create one on the Match report page.')
@@ -268,7 +320,9 @@ elif page == 'Report history':
         with st.container(border=True):
             info_col, action_col = st.columns([5, 1], vertical_alignment='center')
             label = ' — '.join(v for v in (r['application'].get('company'), r['application'].get('role')) if v) or 'Job match report'
-            info_col.markdown(f"**{label}** · {r['score']['overall']}% match")
+            percent = r['score']['overall'] or 0
+            info_col.markdown(f'**{escape(label)}** &nbsp;<span class="pill" style="background:{score_color(percent)}26;'
+                              f'color:{score_color(percent)}">{percent}% match</span>', unsafe_allow_html=True)
             info_col.caption(f"{r['created'][:16].replace('T', ' ')} · {r['model']} · {r.get('resume_name', '')}")
             if action_col.button('Open', key='report_' + r['id']):
                 st.session_state.report_id = r['id']
