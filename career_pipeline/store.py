@@ -18,6 +18,7 @@ class Store:
         CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, manifest TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS events(run_id TEXT, stage TEXT, payload TEXT, created TEXT);
         CREATE TABLE IF NOT EXISTS cache(key TEXT PRIMARY KEY, payload TEXT);
+        CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY, report TEXT NOT NULL);
         ''')
         self.db.commit()
 
@@ -45,6 +46,13 @@ class Store:
         if not row:
             raise ValueError('unknown run')
         return json.loads(row[0])
+
+    def save_report(self, report):
+        self.db.execute('INSERT OR REPLACE INTO reports VALUES (?,?)', (report['id'], json.dumps(report)))
+        self.db.commit()
+
+    def reports(self):
+        return [json.loads(r[0]) for r in self.db.execute('SELECT report FROM reports ORDER BY rowid DESC')]
 
     def history(self):
         return [json.loads(r[0]) for r in self.db.execute('SELECT manifest FROM runs ORDER BY rowid DESC')]

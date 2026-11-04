@@ -39,7 +39,9 @@ def qualified_number(text, value, qualifier):
             prefix = clean[max(previous_end, match.start()-100):match.start()]
             # Accept an explicit parenthetical qualifier immediately following the value/unit.
             suffix = clean[match.end():match.end()+50]
-            found.append(bool(re.search(r'\b(' + qualifier + r')\b', prefix)
+            # "~600,000" and "≈600,000" say "approximately" in a symbol.
+            symbol = 'approx' in qualifier and re.search(r'[~≈]\s*$', clean[:match.start()])
+            found.append(bool(symbol or re.search(r'\b(' + qualifier + r')\b', prefix)
                 or re.match(r'\s*(?:[a-z/-]+\s*){0,2}\((' + qualifier + r')\)', suffix)))
         previous_end = match.end()
     return all(found) if found else bool(re.search(r'\b(' + qualifier + r')\b', clean))

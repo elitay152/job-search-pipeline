@@ -1,10 +1,12 @@
 """Human-facing workbench; pipeline and factual gates remain independent of Streamlit."""
 import difflib
+from html import escape
 import json
 import os
 import uuid
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 from pydantic import ValidationError
 
@@ -20,8 +22,12 @@ from career_pipeline.readiness import app_version, check_provider, budget_plan
 from career_pipeline.baseline import missing_source_jobs
 from career_pipeline.ui_errors import configuration_problem, failure_message
 from career_pipeline.duplicates import duplicate_groups, merge_duplicates
+from career_pipeline.match_report import build_report, report_markdown
 
-PAGES = ['Create application', 'My experience', 'Review & download', 'History']
+REPORT_PAGES = ['Match report', 'Report history']
+GENERATOR_PAGES = ['Create application', 'My experience', 'Review & download', 'Draft history']
+MATCH_COLORS = {'strong': 'green', 'partial': 'orange', 'missing': 'red'}
+REPORT_RESUME = Path('local/report_resume.json')  # The resume used for reports, kept on this computer.
 STATUS_COLORS = {'approved': 'green', 'draft': 'blue', 'needs_review': 'orange', 'failed': 'red', 'running': 'gray'}
 STAGE_LABELS = {'extract': 'Reading the job posting', 'match': 'Matching requirements to your evidence',
                 'generate': 'Writing the first draft', 'validate': 'Checking claims against your sources',
@@ -89,7 +95,108 @@ def edit_evidence(ident):
     st.session_state.edit_id = ident
 
 
+def saved_resume():
+    try:
+        return json.loads(REPORT_RESUME.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+
+
+def save_resume(name, text):
+    REPORT_RESUME.parent.mkdir(parents=True, exist_ok=True)
+    REPORT_RESUME.write_text(json.dumps({'name': name, 'text': text}), encoding='utf-8')
+
+
+STYLE = """
+<style>
+.hero {padding: 1.5rem 1.75rem; border-radius: 1.1rem; margin: 0 0 1.25rem;
+       background: linear-gradient(115deg, #0EA5E9 0%, #6366F1 50%, #C026D3 100%);
+       box-shadow: 0 10px 30px rgba(99, 102, 241, .25);}
+.hero h1 {margin: 0; padding: 0; font-size: 2rem; color: #fff;}
+.hero p {margin: .35rem 0 0; color: rgba(255, 255, 255, .9); font-size: 1.05rem;}
+.score-card {display: flex; flex-wrap: wrap; gap: 1.75rem; align-items: center; padding: 1.25rem 1.5rem;
+             border-radius: 1rem; background: #151F33; border: 1px solid #25324D; margin-bottom: 1rem;}
+.ring {--p: 0; --c: #2DD4BF; width: 128px; height: 128px; border-radius: 50%; flex: none; display: grid;
+       place-items: center; background: conic-gradient(var(--c) calc(var(--p) * 1%), #25324D 0);}
+.ring span {width: 100px; height: 100px; border-radius: 50%; background: #151F33; display: grid;
+            place-items: center; font-size: 2rem; font-weight: 800; color: #F8FAFC;}
+.score-text {flex: 1; min-width: 240px;}
+.score-text h3 {margin: 0 0 .25rem; color: #F8FAFC;}
+.score-text .meta {color: #94A3B8; font-size: .85rem; margin-bottom: .6rem;}
+.pill {display: inline-block; padding: .2rem .7rem; border-radius: 999px; font-size: .85rem; font-weight: 700;
+       margin: 0 .35rem .35rem 0;}
+.pill.strong {background: rgba(16, 185, 129, .18); color: #6EE7B7;}
+.pill.partial {background: rgba(245, 158, 11, .18); color: #FCD34D;}
+.pill.missing {background: rgba(244, 63, 94, .18); color: #FDA4AF;}
+.pill.required {background: rgba(125, 211, 252, .15); color: #7DD3FC;}
+.rec {padding: .85rem 1.1rem; border-radius: .8rem; background: #151F33; border: 1px solid #25324D;
+      border-left: 5px solid #2DD4BF; margin-bottom: .6rem;}
+.rec.question {border-left-color: #F59E0B;}
+.rec .tag {font-size: .72rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #2DD4BF;}
+.rec.question .tag {color: #F59E0B;}
+.rec .action {color: #F1F5F9; font-weight: 600; margin: .15rem 0;}
+.rec .why {color: #94A3B8; font-size: .9rem;}
+</style>
+"""
+MATCH_TEXT = {'strong': '#6EE7B7', 'partial': '#FCD34D', 'missing': '#FDA4AF'}
+
+
+def hero(title, subtitle):
+    st.markdown(f'<div class="hero"><h1>{escape(title)}</h1><p>{escape(subtitle)}</p></div>', unsafe_allow_html=True)
+
+
+def score_color(percent):
+    return '#10B981' if percent >= 75 else '#F59E0B' if percent >= 50 else '#F43F5E'
+
+
+def report_view(report):
+    info = report['application']
+    title = ' — '.join(v for v in (info.get('company'), info.get('role')) if v) or 'Job match report'
+    cost = report.get('estimated_cost')
+    meta = (f"{report['created'][:16].replace('T', ' ')} · {report['model']}"
+            + (f" · {report['resume_name']}" if report.get('resume_name') else '')
+            + (f' · ${cost:.3f}' if cost else ''))
+    score = report['score']
+    overall = score['overall'] or 0
+    required = '' if score['required'] is None else f'<span class="pill required">{score["required"]}% of required</span>'
+    st.markdown(
+        f'<div class="score-card"><div class="ring" style="--p:{overall};--c:{score_color(overall)}"><span>{overall}%</span></div>'
+        f'<div class="score-text"><h3>{escape(title)}</h3><div class="meta">{escape(meta)}</div>'
+        f'<span class="pill strong">{score["strong"]} strong</span><span class="pill partial">{score["partial"]} partial</span>'
+        f'<span class="pill missing">{score["missing"]} missing</span>{required}'
+        f'<p>{escape(report["summary"])}</p></div></div>', unsafe_allow_html=True)
+    st.caption('Strong matches count fully and partial matches half. A model judgment checked against your resume text, '
+               'not an ATS score or hiring prediction.')
+    st.markdown('#### What to change')
+    st.caption('Questions point at experience your resume does not show; answer them for yourself. '
+               'Skip any edit that would add something you have not actually done.')
+    if not report['recommendations']:
+        st.caption('No changes suggested.')
+    cards = ''.join(
+        f'<div class="rec {r["kind"]}"><div class="tag">{n} · {"Question" if r["kind"] == "question" else "Edit"}</div>'
+        f'<div class="action">{escape(r["action"])}</div><div class="why">{escape(r["reason"])}</div></div>'
+        for n, r in enumerate(report['recommendations'], 1))
+    if cards:
+        st.markdown(cards, unsafe_allow_html=True)
+    st.markdown('#### Requirement by requirement')
+    order = {'missing': 0, 'partial': 1, 'strong': 2}
+    rows = sorted(report['requirements'], key=lambda r: (order[r['match']], r['priority'] != 'required'))
+    table = pd.DataFrame([{'Match': r['match'].title(), 'Priority': r['priority'].title(), 'Requirement': r['requirement'],
+                           'In your resume': r['resume_quote'], 'Note': r['note']} for r in rows])
+    if not table.empty:
+        table = table.style.map(lambda value: f"color: {MATCH_TEXT.get(str(value).lower(), 'inherit')}; font-weight: 700",
+                                subset=['Match'])
+    st.dataframe(table, hide_index=True, width='stretch',
+                 column_config={'Requirement': st.column_config.TextColumn(width='large'),
+                                'In your resume': st.column_config.TextColumn(width='large')})
+    if report['practical_constraints']:
+        st.caption('Practical details (not scored): ' + ' · '.join(report['practical_constraints']))
+    st.download_button('Download report (Markdown)', report_markdown(report), 'match-report.md', 'text/markdown',
+                       key='download_' + report['id'])
+
+
 st.set_page_config(page_title='Application Studio', layout='wide')
+st.markdown(STYLE, unsafe_allow_html=True)
 store = Store(os.getenv('CAREER_DB', 'local/pipeline.sqlite'))
 if 'career' not in st.session_state:
     path = next((p for p in (Path('local/career.json'), Path('private/career-v3.json')) if p.exists()), Path('local/career.json'))
@@ -105,37 +212,124 @@ if 'nav_target' in st.session_state:
 
 with st.sidebar:
     st.title('Application Studio')
-    st.caption('Tailored applications where every claim links to your own sources.')
-    page = st.radio('Go to', PAGES, key='page', label_visibility='collapsed')
+    st.caption('See how well your resume fits a job, and what to change.')
+    show_generator = st.session_state.get('show_generator', False)
+    pages = REPORT_PAGES + (GENERATOR_PAGES if show_generator else [])
+    if st.session_state.get('page') not in pages:
+        st.session_state.page = pages[0]
+    page = st.radio('Go to', pages, key='page', label_visibility='collapsed')
     st.divider()
-    st.metric('Saved source records', sum(e.eligible for e in career.evidence))
-    with st.expander('Try the synthetic example'):
-        st.caption('Replaces your workspace with fictional data. Download a backup first.')
-        if st.button('Load synthetic example'):
-            save_career(Career.model_validate_json(Path('fixtures/career.json').read_text(encoding='utf-8')))
-            st.rerun()
-    with st.expander('Import / backup'):
-        upload = st.file_uploader('Import an evidence backup', type=['json'])
-        if st.button('Import backup', disabled=upload is None):
+    st.toggle('Resume & letter generator (experimental)', key='show_generator',
+              help='The earlier tool that writes a tailored resume and cover letter from your saved experience.')
+    if show_generator:
+        st.metric('Saved source records', sum(e.eligible for e in career.evidence))
+        with st.expander('Try the synthetic example'):
+            st.caption('Replaces your workspace with fictional data. Download a backup first.')
+            if st.button('Load synthetic example'):
+                save_career(Career.model_validate_json(Path('fixtures/career.json').read_text(encoding='utf-8')))
+                st.rerun()
+        with st.expander('Import / backup'):
+            upload = st.file_uploader('Import an evidence backup', type=['json'])
+            if st.button('Import backup', disabled=upload is None):
+                try:
+                    save_career(user_provided_profile(Career.model_validate_json(upload.getvalue())))
+                    st.rerun()
+                except ValueError as exc:
+                    validation_message(exc)
+            st.download_button('Download evidence backup', career.model_dump_json(indent=2), 'career-evidence.json', 'application/json')
+            path = st.text_input('Evidence file on this computer', placeholder='private/career-v3.json')
+            if st.button('Load evidence file', disabled=not path):
+                try:
+                    save_career(user_provided_profile(Career.model_validate_json(Path(path).read_text(encoding='utf-8'))))
+                    st.rerun()
+                except (ValueError, OSError):
+                    st.error('Could not load a valid evidence file. Check the path and file format.')
+st.sidebar.caption('Saved only on this computer · version ' + app_version())
+
+if show_generator and st.session_state.get('library_error'):
+    st.warning('The saved experience library could not be read. The original file is untouched. Import a valid backup from the sidebar before continuing.')
+
+if page == 'Match report':
+    hero('Match your resume to a job', 'See how well you fit, what to change, and what to ask yourself before you apply.')
+    with st.container(border=True):
+        st.subheader('1. Your resume')
+        current = saved_resume()
+        if current:
+            st.caption(f"Using **{current['name']}** · {len(current['text'].split())} words. Upload or paste to replace it.")
+        upload = st.file_uploader('Upload your resume', type=['docx', 'txt'])
+        if upload is not None and st.button('Use this resume'):
             try:
-                save_career(user_provided_profile(Career.model_validate_json(upload.getvalue())))
+                from career_pipeline.resume_intake import read_resume
+                save_resume(upload.name, read_resume(upload.getvalue(), upload.name))
                 st.rerun()
             except ValueError as exc:
                 validation_message(exc)
-        st.download_button('Download evidence backup', career.model_dump_json(indent=2), 'career-evidence.json', 'application/json')
-        path = st.text_input('Evidence file on this computer', placeholder='private/career-v3.json')
-        if st.button('Load evidence file', disabled=not path):
-            try:
-                save_career(user_provided_profile(Career.model_validate_json(Path(path).read_text(encoding='utf-8'))))
+        with st.expander('Or paste resume text'):
+            pasted = st.text_area('Resume text', height=200, key='resume_text')
+            if st.button('Use pasted text', disabled=len(pasted.strip()) < 50):
+                save_resume('Pasted resume', pasted)
                 st.rerun()
-            except (ValueError, OSError):
-                st.error('Could not load a valid evidence file. Check the path and file format.')
-    st.caption('Saved only on this computer · version ' + app_version())
+    with st.container(border=True):
+        st.subheader('2. The job')
+        company_col, role_col = st.columns(2)
+        company = company_col.text_input('Company (optional)', key='report_company')
+        role = role_col.text_input('Role (optional)', key='report_role')
+        with st.expander('Load from a job posting link'):
+            report_url = st.text_input('Job posting URL', key='report_url',
+                help='Public pages only. Sites that need a sign-in (such as LinkedIn) usually block this; paste the text instead.')
+            if st.button('Load posting', disabled=not report_url, key='report_load'):
+                try:
+                    with st.spinner('Reading the posting…'):
+                        st.session_state.report_jd = load_job_url(report_url)
+                    st.success('Posting loaded below. Check the text before continuing.')
+                except ValueError as exc:
+                    validation_message(exc)
+        report_jd = st.text_area('Paste the job description', height=220, key='report_jd',
+                                 placeholder='Paste the full job description, including qualifications and responsibilities.')
+    with st.container(border=True):
+        st.subheader('3. Create the report')
+        engine = st.radio('Model', ['OpenAI gpt-5-mini', 'Practice (free, word matching only)'], horizontal=True,
+                          help='gpt-5-mini costs about 1–2 cents per report and takes about a minute. '
+                               'Practice mode just counts shared words, for trying the page out.')
+        report_provider = 'openai' if engine.startswith('OpenAI') else 'mock'
+        problem = configuration_problem(report_provider)
+        if problem:
+            st.error(problem)
+        if st.button('Create match report', type='primary',
+                     disabled=bool(problem) or not current or len(report_jd.strip()) < 20):
+            try:
+                with st.spinner('Comparing your resume with the posting…'):
+                    report = build_report(report_jd, current['text'], store, report_provider,
+                                          application={'company': company, 'role': role}, resume_name=current['name'])
+                st.session_state.report_id = report['id']
+            except ValueError as exc:
+                validation_message(exc)
+            except Exception as exc:
+                st.error(failure_message(exc))
+    shown = next((r for r in store.reports() if r['id'] == st.session_state.get('report_id')), None)
+    if shown:
+        with st.container(border=True):
+            report_view(shown)
 
-if st.session_state.get('library_error'):
-    st.warning('The saved experience library could not be read. The original file is untouched. Import a valid backup from the sidebar before continuing.')
+elif page == 'Report history':
+    hero('Report history', 'Every match report you have run, newest first.')
+    reports = store.reports()
+    if not reports:
+        st.info('No reports yet. Create one on the Match report page.')
+    for r in reports:
+        with st.container(border=True):
+            info_col, action_col = st.columns([5, 1], vertical_alignment='center')
+            label = ' — '.join(v for v in (r['application'].get('company'), r['application'].get('role')) if v) or 'Job match report'
+            percent = r['score']['overall'] or 0
+            info_col.markdown(f'**{escape(label)}** &nbsp;<span class="pill" style="background:{score_color(percent)}26;'
+                              f'color:{score_color(percent)}">{percent}% match</span>', unsafe_allow_html=True)
+            info_col.caption(f"{r['created'][:16].replace('T', ' ')} · {r['model']} · {r.get('resume_name', '')}")
+            if action_col.button('Open', key='report_' + r['id']):
+                st.session_state.report_id = r['id']
+                go_to('Match report')
+                st.rerun()
 
-if page == 'My experience':
+elif page == 'My experience':
     st.header('My experience')
     st.caption('Your resume and saved entries are the source of truth. Generated text is checked against them.')
     resume_tab, jobs_tab, evidence_tab = st.tabs(['Resume & contact', f'Jobs ({len(career.employments)})',
@@ -643,8 +837,8 @@ elif page == 'Review & download':
             if st.toggle('Show full audit here', key='show_audit_' + selected):
                 st.json(m, expanded=False)
 
-else:
-    st.header('History')
+elif page == 'Draft history':
+    st.header('Draft history')
     history = store.history()
     if not history:
         st.info('No applications yet. Create your first draft to start a history.')
