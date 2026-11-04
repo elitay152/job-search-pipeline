@@ -57,7 +57,9 @@ def preview(packet, career):
                 label = tech.name if tech.context == 'professional' else f'{tech.name} ({tech.context})'
                 categories.setdefault(tech.category, []).append(label)
         if categories:
-            resume += ['## Technical Skills'] + [f'{name}: ' + ', '.join(items) for name, items in categories.items()]
+            # Core categories first; one-off training or academic tools follow.
+            ordered = sorted(categories.items(), key=lambda item: -len(item[1]))
+            resume += ['## Technical Skills'] + [f'{name}: ' + ', '.join(items) for name, items in ordered]
     job_claims = {ident: [] for ident in roles}
     shared_claims = {}
     unplaced = []
