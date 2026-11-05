@@ -1,7 +1,7 @@
 # Evidence-grounded resume development
 Version: resume-guidance-v3
 Adapted only from ResumeSkills and resume-tailoring-skill; attribution and MIT licenses in SOURCES.md.
-General professional guidance is not a learned user voice. Detailed workflow: docs/resume-development.md.
+General professional guidance is not a learned user voice. Detailed workflow: docs/archive/resume-development.md.
 
 SOURCE LIBRARY: Preserve resume variants and stable evidence IDs. Repetition is not verification.
 Keep employment, independent projects, research and education distinct. Summaries and keyword lists

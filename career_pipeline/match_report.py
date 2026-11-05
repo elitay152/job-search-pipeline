@@ -127,7 +127,22 @@ def score(rows):
     return dict(counts, overall=percent(rows), required=percent(required), required_total=len(required), total=len(rows))
 
 
-def build_report(jd, resume, store, provider='openai', model=None, application=None, resume_name=''):
+def changes_since(previous, report):
+    """What moved between two reports on the same posting, e.g. after editing the resume."""
+    rank = {'missing': 0, 'partial': 1, 'strong': 2}
+    before = {r['requirement']: r['match'] for r in previous['requirements']}
+    improved, worse = [], []
+    for r in report['requirements']:
+        old = before.get(r['requirement'])
+        if old and rank[r['match']] != rank[old]:
+            (improved if rank[r['match']] > rank[old] else worse).append(
+                {'requirement': r['requirement'], 'from': old, 'to': r['match']})
+    return {'previous_id': previous['id'], 'previous_created': previous['created'],
+            'score_change': (report['score']['overall'] or 0) - (previous['score']['overall'] or 0),
+            'improved': improved, 'worse': worse}
+
+
+def build_report(jd, resume, store, provider='openai', model=None, application=None, resume_name='', previous=None):
     if len(resume.strip()) < 50:
         raise ValueError('Add your resume text first (upload a DOCX or TXT, or paste it).')
     requirements = extract(jd)
@@ -149,8 +164,26 @@ def build_report(jd, resume, store, provider='openai', model=None, application=N
               'summary': raw.get('summary', '').strip(), 'requirements': rows, 'recommendations': recommendations,
               'practical_constraints': [q.text for q in requirements if q.kind == 'constraint'],
               'score': score(rows), 'estimated_cost': cost, 'telemetry': gateway.telemetry}
+    if previous:
+        report['changes'] = changes_since(previous, report)
     store.save_report(report)
     return report
+
+
+def report_label(report):
+    info = report['application']
+    return ' — '.join(v for v in (info.get('company'), info.get('role')) if v) or 'Job match report'
+
+
+def compare_reports(reports):
+    """One row per report, best match first, with the required items each one is missing."""
+    rows = []
+    for r in reports:
+        gaps = [q['requirement'] for q in r['requirements'] if q['match'] == 'missing' and q['priority'] == 'required']
+        rows.append({'id': r['id'], 'job': report_label(r), 'created': r['created'], 'overall': r['score']['overall'] or 0,
+                     'required': r['score']['required'], 'strong': r['score']['strong'],
+                     'partial': r['score']['partial'], 'missing': r['score']['missing'], 'required_gaps': gaps})
+    return sorted(rows, key=lambda row: (-row['overall'], -(row['required'] or 0)))
 
 
 def report_markdown(report):
@@ -162,8 +195,13 @@ def report_markdown(report):
                 + (f" · resume: {report['resume_name']}" if report.get('resume_name') else ''),
                 f"**Match: {s['overall']}%** overall" + (f" · {s['required']}% of required" if s['required'] is not None else '')
                 + f" · {s['strong']} strong, {s['partial']} partial, {s['missing']} missing",
-                report['summary'],
-                '## Recommended changes\n\n' + '\n'.join(
+                report['summary']]
+    if report.get('changes'):
+        c = report['changes']
+        moved = [f"- {m['requirement']}: {m['from']} → {m['to']}" for m in c['improved'] + c['worse']]
+        sections.append(f"## Since the previous version ({c['previous_created'][:10]})\n\n"
+                        f"Match {c['score_change']:+d} points." + ('\n\n' + '\n'.join(moved) if moved else ''))
+    sections += ['## Recommended changes\n\n' + '\n'.join(
                     f"{n}. {'Question: ' if r['kind'] == 'question' else ''}{r['action']} — {r['reason']}"
                     for n, r in enumerate(report['recommendations'], 1))]
     table = ['| Match | Priority | Requirement | Evidence in your resume | Note |', '|---|---|---|---|---|']
