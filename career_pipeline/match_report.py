@@ -198,7 +198,7 @@ def report_markdown(report):
                 report['summary']]
     if report.get('changes'):
         c = report['changes']
-        moved = [f"- {m['requirement']}: {m['from']} → {m['to']}" for m in c['improved'] + c['worse']]
+        moved = [f"- {m['requirement'].rstrip('.')}: {m['from']} → {m['to']}" for m in c['improved'] + c['worse']]
         sections.append(f"## Since the previous version ({c['previous_created'][:10]})\n\n"
                         f"Match {c['score_change']:+d} points." + ('\n\n' + '\n'.join(moved) if moved else ''))
     sections += ['## Recommended changes\n\n' + '\n'.join(

@@ -180,7 +180,7 @@ def report_view(report):
     changes = report.get('changes')
     if changes:
         delta = changes['score_change']
-        moved = ''.join(f"<li>{escape(m['requirement'][:90])}: {m['from']} → <b>{m['to']}</b></li>"
+        moved = ''.join(f"<li>{escape(m['requirement'][:90].rstrip('.'))}: {m['from']} → <b>{m['to']}</b></li>"
                         for m in changes['improved'] + changes['worse'])
         st.markdown(f'<div class="delta{" down" if delta < 0 else ""}"><b>{delta:+d} points</b> since your previous version '
                     f"({escape(changes['previous_created'][:10])}): {len(changes['improved'])} improved, "

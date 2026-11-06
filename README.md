@@ -6,6 +6,8 @@ Application Studio is a small local web app (Python + Streamlit). You give it yo
 posting, and it produces a match report in about half a minute for well under a cent. It never writes or
 changes your resume for you, and it never suggests claiming experience your resume doesn't show.
 
+<p align="center"><img src="docs/images/match-report.png" alt="A match report: an 82% score ring, a +5 point change since the previous resume version, prioritized edits and questions, and a requirement-by-requirement table" width="760"></p>
+
 ## What you get
 
 - **Match score**: strong requirements count fully, partial ones half, plus a score for required items only.
@@ -21,6 +23,12 @@ changes your resume for you, and it never suggests claiming experience your resu
 
 Practical details such as location or salary are listed but not scored. The score is a model judgment
 checked against your resume text, not an ATS score or a hiring prediction.
+
+| Start a report | Compare jobs |
+|---|---|
+| <img src="docs/images/match-report-start.png" alt="The Match report page with a saved resume and a pasted job posting"> | <img src="docs/images/compare-jobs.png" alt="Two jobs ranked by match with colored bars and the required items each is missing"> |
+
+_Screenshots use a fictional candidate and fictional job postings._
 
 ## Setup (Windows)
 
